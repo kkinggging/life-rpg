@@ -39,4 +39,8 @@ export default defineConfig({
     }),
   ],
   base: '/life-rpg/',
+  build: {
+    outDir: 'docs',
+    emptyOutDir: true,
+  },
 })
