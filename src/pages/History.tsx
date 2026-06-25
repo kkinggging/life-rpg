@@ -85,10 +85,12 @@ export default function History() {
   }
   const today = todayISO()
 
-  // ── 运行时数据（store 实际写入的 key） ──
-  const records = (state as unknown as { records: any[] }).records ?? []
-  const attributes = (state as unknown as { attributes: Record<string, number> }).attributes ?? {}
-  const weekRecs = records.filter((r: any) => weekDays.includes(r.date))
+  // FIX: Use correct property names from AppState: .checkinRecords and .baseAttrs
+  // Previously read from phantom .records and .attributes which don't exist on state,
+  // making the entire History page show zeros/empty for all data.
+  const records = state.checkinRecords ?? []
+  const attributes = state.baseAttrs as unknown as Record<string, number>
+  const weekRecs = records.filter((r) => weekDays.includes(r.date))
   const systems = CHECKINS.map((c) => c.system)
 
   // ── 基础属性（按值降序） ──
@@ -97,17 +99,11 @@ export default function History() {
     (a, b) => (attributes[b] ?? 0) - (attributes[a] ?? 0),
   )
 
-  // ── 衍生技能（初始值，后续可能由派生公式计算） ──
+  // ── 衍生技能 ──
   const derivedKeys = DERIVED_SKILLS as unknown as string[]
   const derivedVals: Record<string, number> = {}
   for (const k of derivedKeys) {
-    // 如果 store 尚未展开 derivedSkills，则使用默认值
-    derivedVals[k] = Math.round(
-      ((state as any).derivedSkills?.[k] ??
-        // 回退：以各基础属性均值作为临时技能值
-        attributes[k] ??
-        20),
-    )
+    derivedVals[k] = Math.round(state.derivedSkills[k as DerivedSkill] ?? 20)
   }
   const sortedDerived = [...derivedKeys].sort(
     (a, b) => (derivedVals[b] ?? 0) - (derivedVals[a] ?? 0),

@@ -5,8 +5,9 @@ import { useStore } from '../store'
 import AttributeBar from '../components/AttributeBar'
 import ExportImport from '../components/ExportImport'
 import { BASE_ATTRS, DERIVED_SKILLS } from '../types'
-import type { BaseAttr, DerivedSkill } from '../types'
+import type { BaseAttr, DerivedSkill, CheckinSystem } from '../types'
 import { CHECKINS, todayISO } from '../utils'
+import { calcGamma } from '../math'
 
 interface Props {
   onStartCheckin: () => void
@@ -34,7 +35,7 @@ export default function Dashboard({ onStartCheckin }: Props) {
       <div className="flex items-center justify-between mb-1 mt-4">
         <div className="flex items-center gap-2">
           <h1 className="text-lg font-bold text-slate-100">⚔️ 个人 OS</h1>
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 font-medium">v6</span>
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 font-medium">v7</span>
         </div>
         <span className="text-xs text-slate-500">{dateStr}</span>
       </div>
@@ -42,7 +43,7 @@ export default function Dashboard({ onStartCheckin }: Props) {
       {/* ── 今日打卡状态条 ── */}
       <div className="flex flex-wrap gap-2 mb-5 mt-2">
         {CHECKINS.map(c => {
-          const done = doneSystems.has(c.system)
+          const done = doneSystems.has(c.system as CheckinSystem)
           return (
             <span
               key={c.system}
@@ -107,7 +108,7 @@ export default function Dashboard({ onStartCheckin }: Props) {
       {/* ── 统计信息 ── */}
       <div className="flex items-center justify-center gap-4 mb-4">
         <span className="text-[11px] text-slate-500">
-          掌控感阻尼: 1.00
+          掌控感阻尼: {calcGamma(state.derivedSkills.macroControl).toFixed(2)}
         </span>
         <span className="text-slate-700">·</span>
         <span className="text-[11px] text-slate-500">

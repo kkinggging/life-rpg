@@ -13,7 +13,7 @@ import type {
   BufferPool,
   BlackBox,
 } from './types'
-import { tierMultiplier } from './types'
+import { tierMultiplier, DEFAULT_DERIVED_SKILLS } from './types'
 import { calcAllDerivedSkills, calcGamma, bufferPoolCheck } from './math'
 import { pickRandomQuestion, getConfidence, QUESTIONS } from './qfilter'
 import { CHECKINS, uid, todayISO } from './utils'
@@ -42,7 +42,8 @@ const INITIAL_BASE_ATTRS: BaseAttrs = {
 function computeInitialDerived(base: BaseAttrs): DerivedSkills {
   const mock: AppState = {
     baseAttrs: base,
-    derivedSkills: {} as DerivedSkills,
+    // FIX: Use DEFAULT_DERIVED_SKILLS instead of {} as DerivedSkills type lie
+    derivedSkills: { ...DEFAULT_DERIVED_SKILLS },
     checkinRecords: [], qfilterRecords: [], bufferPools: [],
     blackBoxes: [], lastBackup: null, daysSinceFirstUse: 0, blindTestResults: [],
   }
@@ -186,7 +187,15 @@ const Ctx = createContext<StoreContext | null>(null)
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(reducer, null, loadState)
-  const pendingQFilterRef = React.useRef<{ skill: DerivedSkill; answer: number; questionId: string } | null>(null)
+  // FIX: Holds pending checkin data when QFilter triggers; dispatched after QFilter answer or skip.
+  // This prevents the double-dispatch bug where addCheckin and answerQFilter both moved skills.
+  // Previously addCheckin dispatched CHECKIN at rate 0.10, then answerQFilter dispatched a second
+  // CHECKIN at the QFilter rate, causing net convergence to be higher than intended.
+  const pendingCheckinRef = React.useRef<{
+    record: CheckinRecord
+    baseAttrDelta: Partial<BaseAttrs>
+    triggeredSkill: DerivedSkill
+  } | null>(null)
 
   useEffect(() => { saveState(state) }, [state])
 
@@ -200,7 +209,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const baseAttrDelta: Partial<BaseAttrs> = {}
       for (const [k, v] of Object.entries(rawDelta)) {
         if (BASE_ATTR_KEYS.has(k) && typeof v === 'number' && v !== 0) {
-          ;(baseAttrDelta as Record<string, number>)[k] = v
+          // FIX: Clamp raw deltas to spec range [-2.0, 2.0]
+          // Learning deep+core = 2.5, social charm+state=3 = 2.5, abstinence relapse = -3.0
+          // all exceed the 0.5~2.0 range per tech-spec §4.1
+          ;(baseAttrDelta as Record<string, number>)[k] = Math.max(-2.0, Math.min(2.0, v))
         }
       }
 
@@ -230,19 +242,28 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               questionText: q.text,
               options: q.options,
             }
-            pendingQFilterRef.current = { skill: pool.skill, answer: 0, questionId: q.id }
             break
           }
         }
       }
 
-      // 4. 派发 CHECKIN（无 QFilter 修正）
+      // 4. Create checkin record
       const record: CheckinRecord = {
         id: uid(), date: todayISO(),
         system: systemId as CheckinRecord['system'],
         answers, baseAttrDelta,
       }
-      dispatch({ type: 'CHECKIN', record, baseAttrDelta, qFilterBonuses: undefined })
+
+      // 5. Dispatch: delay if QFilter triggered (single dispatch with correct rate later)
+      if (qfilterPending) {
+        pendingCheckinRef.current = {
+          record,
+          baseAttrDelta,
+          triggeredSkill: qfilterPending.skill,
+        }
+      } else {
+        dispatch({ type: 'CHECKIN', record, baseAttrDelta, qFilterBonuses: undefined })
+      }
 
       return { bonus: baseAttrDelta, previousDerived: prevDerived, newDerived: previewDerived, qfilterPending }
     },
@@ -251,31 +272,37 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const answerQFilter = useCallback(
     (pending: QFilterPending, answer: number, responseTime: number) => {
-      const confidence = getConfidence(responseTime)
-      const record: QFilterRecord = {
-        id: uid(), date: todayISO(),
-        targetSkill: pending.skill,
-        dimension: pending.dimension,
-        questionVariant: pending.questionId,
-        answer: answer * (confidence < 1.0 ? 0.7 : 1.0), // 低信度衰减
-        responseTime, confidence,
+      // FIX: Retrieve the stashed checkin data (saved in addCheckin when QFilter triggered).
+      // Previously addCheckin dispatched CHECKIN immediately at rate 0.10, then answerQFilter
+      // dispatched a second CHECKIN at the QFilter rate — causing a double-move.
+      // Now addCheckin DELAYS dispatch when QFilter triggers, and answerQFilter does the single
+      // correct dispatch with the proper QFilter bonus applied.
+      const stashed = pendingCheckinRef.current
+      pendingCheckinRef.current = null
+
+      // FIX: answer < 0 is the skip sentinel — apply low rate without saving QFilterRecord
+      const isSkip = answer < 0
+
+      if (!isSkip) {
+        const confidence = getConfidence(responseTime)
+        const qfRecord: QFilterRecord = {
+          id: uid(), date: todayISO(),
+          targetSkill: pending.skill,
+          dimension: pending.dimension,
+          questionVariant: pending.questionId,
+          answer: answer * (confidence < 1.0 ? 0.7 : 1.0), // 低信度衰减
+          responseTime, confidence,
+        }
+        dispatch({ type: 'QFILTER_SAVE', record: qfRecord })
       }
 
-      // 存入记录
-      dispatch({ type: 'QFILTER_SAVE', record })
-
-      // 用 QFilter 得分重新结算衍生技能
-      const qFilterBonuses: Partial<Record<DerivedSkill, number>> = {
-        [pending.skill]: answer,
+      // Dispatch the pending checkin with QFilter bonus applied.
+      // If skip: pass a low score (0) so calcAllDerivedSkills uses rate 0.05 (QFilter<75 per spec).
+      if (stashed) {
+        const qFilterBonuses: Partial<Record<DerivedSkill, number>> = {}
+        qFilterBonuses[stashed.triggeredSkill] = isSkip ? 0 : answer
+        dispatch({ type: 'CHECKIN', record: stashed.record, baseAttrDelta: stashed.baseAttrDelta, qFilterBonuses })
       }
-      // 构造一个虚拟的 CHECKIN action 触发重算
-      // 直接调用 recalc via empty delta
-      const emptyDelta: Partial<BaseAttrs> = {}
-      const dummyRecord: CheckinRecord = {
-        id: uid(), date: todayISO(), system: 'diet' as any,
-        answers: {}, baseAttrDelta: emptyDelta,
-      }
-      dispatch({ type: 'CHECKIN', record: dummyRecord, baseAttrDelta: emptyDelta, qFilterBonuses })
     },
     [],
   )

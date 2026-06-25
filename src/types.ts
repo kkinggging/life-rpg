@@ -212,12 +212,13 @@ export interface IndicatorMeta {
   description: string; // 描述
 }
 
+// ATTR_META labels corrected per generate.md & tech-spec.md §2.1
 export const ATTR_META: Record<BaseAttr, IndicatorMeta> = {
   charm:      { label: '魅力',   emoji: '✨', color: '#f59e0b', description: '搭讪、社交场合的吸引力与存在感' },
-  strength:   { label: '力量',   emoji: '💪', color: '#ef4444', description: '体能、力量训练带来的身体素质' },
-  intellect:  { label: '智力',   emoji: '🧠', color: '#3b82f6', description: '学习、深度思考与认知体系的构建' },
-  social:     { label: '社交',   emoji: '🤝', color: '#10b981', description: '人际交往、沟通博弈与群体影响力' },
-  willpower:  { label: '意志力', emoji: '🔥', color: '#8b5cf6', description: '自律、执行力和内心的坚韧程度' },
+  strength:   { label: '强壮',   emoji: '💪', color: '#ef4444', description: '体能、力量训练带来的身体素质' },
+  intellect:  { label: '思维',   emoji: '🧠', color: '#3b82f6', description: '学习、深度思考与认知体系的构建' },
+  social:     { label: '社交能力', emoji: '🤝', color: '#10b981', description: '人际交往、沟通博弈与群体影响力' },
+  willpower:  { label: '坚定',   emoji: '🔥', color: '#8b5cf6', description: '自律、执行力和内心的坚韧程度' },
   health:     { label: '健康',   emoji: '🫀', color: '#ec4899', description: '身体机能、免疫力与精力充沛度' },
   courage:    { label: '勇气',   emoji: '🦁', color: '#f97316', description: '面对恐惧与挑战时的行动力' },
   abstinence: { label: '禁欲',   emoji: '🧘', color: '#6366f1', description: '对欲望的觉察、管理与克制能力' },
@@ -242,7 +243,8 @@ export const INDICATOR_META: Record<Indicator, IndicatorMeta> = {
 // 6. 打卡体系类型
 // ---------------------------------------------------------------------------
 
-export type CheckinSystem = 'diet' | 'fitness' | 'social' | 'study' | 'work' | 'meditation' | 'sleep' | string;
+// FIX: removed 'study' (actual system is 'learning'), removed | string to enforce type safety
+export type CheckinSystem = 'diet' | 'fitness' | 'social' | 'learning' | 'abstinence';
 
 // ---------------------------------------------------------------------------
 // 7. 核心数据接口
@@ -368,11 +370,12 @@ export const DEFAULT_APP_STATE: AppState = {
  *   60-80 → 0.60 (减速)
  *   80-95 → 0.25 (大幅减速)
  *   95-100 → 0.10 (极慢)
+ * FIX: changed < to <= so boundary values fall in the correct bracket per spec
  */
 export function tierMultiplier(val: number): number {
-  if (val < 60) return 1.0;
-  if (val < 80) return 0.6;
-  if (val < 95) return 0.25;
+  if (val <= 60) return 1.0;
+  if (val <= 80) return 0.6;
+  if (val <= 95) return 0.25;
   return 0.1;
 }
 

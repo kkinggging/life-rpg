@@ -5,8 +5,8 @@ import { useState, useEffect, useRef } from 'react'
 import type { BaseAttr, DerivedSkill } from '../types'
 import { ATTR_META, SKILL_META } from '../types'
 import { useStore } from '../store'
-import type { QFilterPending } from '../store'
 import CheckinFlow from '../components/CheckinFlow'
+import QFilterPanel from '../components/QFilterPanel'
 import { CHECKINS } from '../utils'
 
 interface Props {
@@ -30,10 +30,17 @@ export default function Checkin({ onDone, onCancel }: Props) {
     setResult(r)
   }
 
-  const handleQFilterAnswer = (answer: number) => {
+  const handleQFilterAnswer = (answer: number, responseTime: number) => {
+    if (!result?.qfilterPending) return
+    answerQFilter(result.qfilterPending, answer, responseTime)
+    setQfilterResolved(true)
+  }
+
+  const handleQFilterSkip = () => {
     if (!result?.qfilterPending) return
     const rt = Date.now() - qfilterStartRef.current
-    answerQFilter(result.qfilterPending, answer, rt)
+    // -1 is the skip sentinel — store.tsx answerQFilter detects it and applies low rate
+    answerQFilter(result.qfilterPending, -1, rt)
     setQfilterResolved(true)
   }
 
@@ -102,42 +109,13 @@ export default function Checkin({ onDone, onCancel }: Props) {
 
   // ── Stage 3: QFilter 弹窗 ──
   if (showQFilter && result.qfilterPending && !qfilterResolved) {
-    const q = result.qfilterPending
     return (
       <div className="px-4 pt-safe pt-6 max-w-lg mx-auto">
-        <div className="bg-slate-800/80 rounded-2xl p-5 border border-amber-500/40 mb-4">
-          <div className="flex items-center gap-2 mb-4">
-            <span className="text-xl">🔬</span>
-            <div>
-              <p className="text-sm font-semibold text-amber-400">过渡筛选提问</p>
-              <p className="text-[11px] text-slate-500">
-                这个提问影响 '{SKILL_META[q.skill]?.label ?? q.skill}' 的增幅速率
-              </p>
-            </div>
-          </div>
-          <p className="text-[15px] font-medium text-slate-200 mb-5 leading-relaxed">{q.questionText}</p>
-          <div className="flex flex-col gap-2.5">
-            {q.options.map(opt => (
-              <button
-                key={opt.value}
-                onClick={() => handleQFilterAnswer(opt.value)}
-                className="tap flex items-center gap-3 px-4 py-3.5 bg-slate-700/60
-                           rounded-xl border border-slate-600/50
-                           active:border-amber-500/60 active:bg-slate-600/80
-                           transition-all text-left no-select"
-              >
-                <span className="text-xl w-7 text-center">{opt.icon}</span>
-                <span className="text-sm text-slate-200">{opt.label}</span>
-              </button>
-            ))}
-          </div>
-          <button
-            onClick={() => setQfilterResolved(true)}
-            className="w-full tap mt-3 py-2.5 text-slate-500 text-sm no-select"
-          >
-            跳过（保持基础增幅）
-          </button>
-        </div>
+        <QFilterPanel
+          pending={result.qfilterPending}
+          onAnswer={handleQFilterAnswer}
+          onSkip={handleQFilterSkip}
+        />
       </div>
     )
   }
