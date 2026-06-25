@@ -11,6 +11,28 @@ import BottomNav from './components/BottomNav'
 import type { BaseAttr, BaseAttrs } from './types'
 import { DEFAULT_BASE_ATTRS, DEFAULT_APP_STATE } from './types'
 
+// ⚠️ 每次发版递增此版本号 → iOS PWA 自动检测并强制刷新
+const APP_VERSION = '3'
+
+async function checkVersionAndUpdate() {
+  const stored = localStorage.getItem('app-version')
+  if (stored === APP_VERSION) return // 版本一致，无需操作
+
+  // 版本不一致 → 清除所有缓存 + 注销旧 SW
+  try {
+    const keys = await caches.keys()
+    await Promise.all(keys.map(k => caches.delete(k)))
+  } catch { /* ignore */ }
+
+  try {
+    const regs = await navigator.serviceWorker.getRegistrations()
+    await Promise.all(regs.map(r => r.unregister()))
+  } catch { /* ignore */ }
+
+  localStorage.setItem('app-version', APP_VERSION)
+  window.location.reload()
+}
+
 // ============================================================
 // Inner component (has access to store context)
 // ============================================================
@@ -19,9 +41,16 @@ function AppInner() {
   const { state, importJSON } = useStore()
   const [tab, setTab] = useState<'dashboard' | 'checkin' | 'history'>('dashboard')
   const [showCalibration, setShowCalibration] = useState(false)
+  const [checking, setChecking] = useState(true)
 
-  // On mount: check if this is a first-time user (all attrs at default, no records)
+  // 版本检测 — 每次启动时运行
   useEffect(() => {
+    checkVersionAndUpdate().finally(() => setChecking(false))
+  }, [])
+
+  // On mount: check if this is a first-time user
+  useEffect(() => {
+    if (checking) return
     const allDefault = (Object.keys(DEFAULT_BASE_ATTRS) as BaseAttr[]).every(
       (key) => state.baseAttrs[key] === DEFAULT_BASE_ATTRS[key],
     )
@@ -29,9 +58,8 @@ function AppInner() {
     if (allDefault && noRecords) {
       setShowCalibration(true)
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [checking]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // After calibration: persist the calibrated values and hide the calibration screen
   const handleCalibrationComplete = (values: Record<BaseAttr, number>) => {
     const newState = {
       ...DEFAULT_APP_STATE,
@@ -39,6 +67,14 @@ function AppInner() {
     }
     importJSON(JSON.stringify(newState))
     setShowCalibration(false)
+  }
+
+  if (checking) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center">
+        <p className="text-slate-400 text-sm animate-pulse">⚔️ 加载中…</p>
+      </div>
+    )
   }
 
   if (showCalibration) {
