@@ -32,7 +32,10 @@ export default function Dashboard({ onStartCheckin }: Props) {
     <div className="px-4 pt-safe pb-4 max-w-lg mx-auto">
       {/* ── 顶部：标题 + 日期 ── */}
       <div className="flex items-center justify-between mb-1 mt-4">
-        <h1 className="text-lg font-bold text-slate-100">⚔️ 个人 OS</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-lg font-bold text-slate-100">⚔️ 个人 OS</h1>
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 font-medium">v4</span>
+        </div>
         <span className="text-xs text-slate-500">{dateStr}</span>
       </div>
 

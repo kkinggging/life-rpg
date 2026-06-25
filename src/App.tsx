@@ -12,7 +12,7 @@ import type { BaseAttr, BaseAttrs } from './types'
 import { DEFAULT_BASE_ATTRS, DEFAULT_APP_STATE } from './types'
 
 // ⚠️ 每次发版递增此版本号 → iOS PWA 自动检测并强制刷新
-const APP_VERSION = '3'
+const APP_VERSION = '4'
 
 async function checkVersionAndUpdate() {
   const stored = localStorage.getItem('app-version')

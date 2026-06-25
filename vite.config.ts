@@ -36,10 +36,30 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,json}'],
+        // 不预缓存 index.html — 让导航请求走网络，解决 iOS PWA 更新卡死
+        globPatterns: ['**/*.{js,css,svg,png,json,ico}'],
         skipWaiting: true,
         clientsClaim: true,
         cleanupOutdatedCaches: true,
+        // 导航请求（HTML 页面）走网络优先，保证始终拿到最新版
+        runtimeCaching: [
+          {
+            urlPattern: /\/life-rpg\/$/,
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'html-cache',
+              expiration: { maxEntries: 1, maxAgeSeconds: 60 },
+            },
+          },
+          {
+            urlPattern: /\/life-rpg\/index\.html$/,
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'html-cache',
+              expiration: { maxEntries: 1, maxAgeSeconds: 60 },
+            },
+          },
+        ],
       },
     }),
   ],
