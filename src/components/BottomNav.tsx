@@ -16,8 +16,7 @@ const tabs: { key: Tab; label: string; emoji: string }[] = [
 
 export default function BottomNav({ current, onChange }: Props) {
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-slate-850 border-t border-slate-700/50 pb-safe z-50"
-         style={{ backgroundColor: '#0f172a' }}>
+    <nav className="fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-700/50 pb-safe z-50">
       <div className="flex justify-around items-center h-16 max-w-lg mx-auto">
         {tabs.map(t => {
           const active = current === t.key

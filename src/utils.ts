@@ -1,7 +1,8 @@
 // ============================================================
-// 量化人生RPG — 工具函数 & 打卡定义
+// Personal OS RPG — 工具函数 & 打卡定义
 // ============================================================
-import type { Attributes, CheckinSystem } from './types'
+import { BaseAttr, BASE_ATTRS, type BaseAttrs } from './types'
+import { pickRandomQuestion } from './qfilter'
 
 // --- ID ---
 export function uid(): string {
@@ -35,20 +36,20 @@ export interface Question {
 }
 
 export interface CheckinDef {
-  system: CheckinSystem
+  system: string
   label: string
   emoji: string
   color: string
   questions: Question[]
-  calcBonus: (a: Record<string, string>) => Partial<Attributes>
+  calcBonus: (a: Record<string, string>) => Partial<BaseAttrs>
 }
 
 // ============================================================
-// 三个打卡体系
+// 五大打卡体系
 // ============================================================
 export const CHECKINS: CheckinDef[] = [
 
-  // ── 饮食 ──
+  // ── 饮食打卡 ──────────────────────────────────────────────
   {
     system: 'diet',
     label: '饮食打卡',
@@ -69,25 +70,25 @@ export const CHECKINS: CheckinDef[] = [
         id: 'supp',
         text: '有无额外营养补充？',
         options: [
-          { label: '有蛋白/维生素',  value: 'yes',     icon: '💊' },
-          { label: '吃了补充剂',     value: 'sup',     icon: '🧪' },
-          { label: '没有',           value: 'no',      icon: '❌' },
+          { label: '有蛋白/维生素',  value: 'yes', icon: '💊' },
+          { label: '吃了补充剂',     value: 'sup', icon: '🧪' },
+          { label: '没有',           value: 'no',  icon: '❌' },
         ],
       },
     ],
     calcBonus(a) {
-      const b: Partial<Attributes> = { nutrition: 0, willpower: 0 }
-      if (a.meal === 'good')  { b.nutrition = 5;  b.willpower = 2  }
-      if (a.meal === 'ok')    { b.nutrition = 3                    }
-      if (a.meal === 'skip')  { b.nutrition = 1                    }
-      if (a.meal === 'bad')   { b.nutrition = 0;  b.willpower = -1 }
-      if (a.supp === 'yes')   { b.nutrition! += 3                  }
-      if (a.supp === 'sup')   { b.nutrition! += 2                  }
+      const b: Partial<BaseAttrs> = { health: 0, abstinence: 0, willpower: 0 }
+      if (a.meal === 'good')  { b.health = 5;  b.abstinence = 1            }
+      if (a.meal === 'ok')    { b.health = 3                               }
+      if (a.meal === 'skip')  { b.health = 1;  b.willpower = -1            }
+      if (a.meal === 'bad')   { b.health = 0;  b.willpower = -1            }
+      if (a.supp === 'yes')   { b.health! += 3                             }
+      if (a.supp === 'sup')   { b.health! += 2                             }
       return b
     },
   },
 
-  // ── 健身 ──
+  // ── 健身打卡 ──────────────────────────────────────────────
   {
     system: 'fitness',
     label: '健身打卡',
@@ -126,23 +127,27 @@ export const CHECKINS: CheckinDef[] = [
       },
     ],
     calcBonus(a) {
-      const b: Partial<Attributes> = { strength: 0, willpower: 0 }
-      if (a.type === 'rest') { b.willpower = -1; return b }
+      const b: Partial<BaseAttrs> = { strength: 0, health: 0, willpower: 0 }
+      if (a.type === 'rest') return b
+
       // 类型基础
-      if (a.type === 'strength') { b.strength = 4; b.willpower = 2 }
-      if (a.type === 'cardio')   { b.strength = 3; b.willpower = 2 }
-      if (a.type === 'sports')   { b.strength = 2; b.willpower = 1 }
+      if (a.type === 'strength') { b.strength = 6; b.health = 2; b.willpower = 2 }
+      if (a.type === 'cardio')   { b.strength = 4; b.health = 3; b.willpower = 2 }
+      if (a.type === 'sports')   { b.strength = 4; b.health = 2; b.willpower = 1 }
+
       // 强度加成
-      if (a.intensity === 'hard')   { b.strength! += 2; b.willpower! += 2 }
-      if (a.intensity === 'medium') { b.strength! += 1; b.willpower! += 1 }
+      if (a.intensity === 'hard')   { b.strength! += 2; b.health! += 2; b.willpower! += 2 }
+      if (a.intensity === 'medium') { b.strength! += 1; b.health! += 1; b.willpower! += 1 }
+
       // 时长加成
       if (a.duration === 'long')   { b.strength! += 2 }
       if (a.duration === 'medium') { b.strength! += 1 }
+
       return b
     },
   },
 
-  // ── 社交 ──
+  // ── 社交打卡 ──────────────────────────────────────────────
   {
     system: 'social',
     label: '社交打卡',
@@ -206,24 +211,113 @@ export const CHECKINS: CheckinDef[] = [
       },
     ],
     calcBonus(a) {
-      const b: Partial<Attributes> = { charm: 0, social: 0, willpower: 0 }
-      if (a.type === 'none') { b.social = -1; return b }
+      const b: Partial<BaseAttrs> = { charm: 0, social: 0, courage: 0, willpower: 0 }
+      if (a.type === 'none') { b.social = -1; b.willpower = -1; return b }
 
       if (a.type === 'approach') {
-        b.willpower = 3  // 勇气加成
-        if (a.result === 'number')   { b.charm = 8; b.social = 6 }
-        if (a.result === 'good')     { b.charm = 5; b.social = 4 }
-        if (a.result === 'neutral')  { b.charm = 2; b.social = 2 }
-        if (a.result === 'rejected') { b.charm = 2; b.social = 1; b.willpower! += 2 }
-        if (a.state === '3') { b.charm! += 2; b.social! += 2 }
-        if (a.state === '1') { b.charm! -= 1 }
-        if (a.state === '0') { b.charm! -= 2; b.willpower! += 1 }
+        b.courage = 3
+        b.willpower = 1
+        if (a.result === 'number')   { b.charm = 8; b.social = 5                    }
+        if (a.result === 'good')     { b.charm = 5; b.social = 4                    }
+        if (a.result === 'neutral')  { b.charm = 2; b.social = 2                    }
+        if (a.result === 'rejected') { b.charm = 3; b.social = 1; b.courage! += 2   }
+        if (a.state === '3') { b.charm! += 2; b.social! += 1 }
+        if (a.state === '1') { b.charm! -= 1                 }
+        if (a.state === '0') { b.charm! -= 2; b.courage! += 1 }
       } else {
         if (a.engage === 'active')  { b.charm = 3; b.social = 4 }
         if (a.engage === 'normal')  { b.charm = 1; b.social = 2 }
-        if (a.engage === 'passive') { b.social = 1 }
+        if (a.engage === 'passive') { b.social = 1              }
       }
       return b
     },
   },
+
+  // ── 学习打卡 ──────────────────────────────────────────────
+  {
+    system: 'learning',
+    label: '学习打卡',
+    emoji: '🧠',
+    color: '#3b82f6',
+    questions: [
+      {
+        id: 'quality',
+        text: '今天投入学习的感觉？',
+        options: [
+          { label: '高质量深度学习', value: 'deep',    icon: '✨' },
+          { label: '中等投入',       value: 'medium',  icon: '📖' },
+          { label: '低效/走神',      value: 'shallow', icon: '🥱' },
+          { label: '没学',           value: 'none',    icon: '💤' },
+        ],
+      },
+      {
+        id: 'type',
+        text: '学习内容类型？',
+        options: [
+          { label: '核心能力提升',   value: 'core',    icon: '🎯' },
+          { label: '工作相关',       value: 'work',    icon: '💼' },
+          { label: '泛阅读/资讯',    value: 'reading', icon: '📰' },
+          { label: '无效摄入',       value: 'useless', icon: '🗑️' },
+        ],
+        dependsOn: { questionId: 'quality', matches: ['deep', 'medium', 'shallow'] },
+      },
+    ],
+    calcBonus(a) {
+      const b: Partial<BaseAttrs> = { intellect: 0, willpower: 0 }
+      if (a.quality === 'none') { b.willpower = -1; return b }
+
+      // 质量基础
+      if (a.quality === 'deep')    { b.intellect = 5; b.willpower = 3 }
+      if (a.quality === 'medium')  { b.intellect = 3; b.willpower = 2 }
+      if (a.quality === 'shallow') { b.intellect = 2; b.willpower = 1 }
+
+      // 内容类型加成
+      if (a.type === 'core')    { b.intellect! += 3 }
+      if (a.type === 'work')    { b.intellect! += 2 }
+      if (a.type === 'reading') { b.intellect! += 1 }
+
+      return b
+    },
+  },
+
+  // ── 戒色打卡 ──────────────────────────────────────────────
+  {
+    system: 'abstinence',
+    label: '戒色打卡',
+    emoji: '🧘',
+    color: '#6366f1',
+    questions: [
+      {
+        id: 'state',
+        text: '今天状态？',
+        options: [
+          { label: '成功执行替代行为',   value: 'replaced', icon: '🏆' },
+          { label: '平稳度过',           value: 'calm',     icon: '😌' },
+          { label: '有冲动但控制住了',   value: 'resisted', icon: '💪' },
+          { label: '破戒了',             value: 'relapsed', icon: '💔' },
+        ],
+      },
+      {
+        id: 'trigger',
+        text: '触发场景？',
+        options: [
+          { label: '深夜独处',   value: 'late_night', icon: '🌙' },
+          { label: '压力释放',   value: 'stress',     icon: '😫' },
+          { label: '如释重负',   value: 'relief',     icon: '😮‍💨' },
+          { label: '无聊',       value: 'boredom',    icon: '🥱' },
+          { label: '其他',       value: 'other',      icon: '❓' },
+        ],
+        dependsOn: { questionId: 'state', matches: ['relapsed'] },
+      },
+    ],
+    calcBonus(a) {
+      const b: Partial<BaseAttrs> = { abstinence: 0, courage: 0, willpower: 0 }
+      if (a.state === 'replaced')  { b.abstinence = 5;  b.courage = 2;  b.willpower = 4  }
+      if (a.state === 'calm')      { b.abstinence = 3;  b.courage = 1;  b.willpower = 2  }
+      if (a.state === 'resisted')  { b.abstinence = 1;  b.courage = 2;  b.willpower = 3  }
+      if (a.state === 'relapsed')  { b.abstinence = -8; b.courage = -2; b.willpower = -3 }
+      return b
+    },
+  },
+
 ]

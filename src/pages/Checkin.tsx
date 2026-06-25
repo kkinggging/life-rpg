@@ -2,29 +2,44 @@
 // 量化人生RPG — 打卡页
 // ============================================================
 import { useState } from 'react'
-import type { Attributes, CheckinSystem } from '../types'
+import type { DerivedSkill, BaseAttr } from '../types'
 import { ATTR_META } from '../types'
-import CheckinFlow from '../components/CheckinFlow'
-import { CHECKINS } from '../utils'
 import { useStore } from '../store'
+import CheckinFlow from '../components/CheckinFlow'
+import QFilterPanel from '../components/QFilterPanel'
+import { CHECKINS } from '../utils'
 
 interface Props {
   onDone: () => void
   onCancel: () => void
 }
 
-export default function Checkin({ onDone, onCancel }: Props) {
-  const { addCheckin } = useStore()
-  const [sys, setSys] = useState<CheckinSystem | null>(null)
-  const [bonus, setBonus] = useState<Partial<Attributes> | null>(null)
+/** addCheckin 返回值 */
+interface CheckinOutcome {
+  bonus: Partial<Record<string, number>>
+  qfilterTriggered: boolean
+  targetSkill?: DerivedSkill
+}
 
-  const handlePick = (s: CheckinSystem) => setSys(s)
+export default function Checkin({ onDone, onCancel }: Props) {
+  const { addCheckin, answerQFilter } = useStore()
+  const [sys, setSys] = useState<string | null>(null)
+  const [outcome, setOutcome] = useState<CheckinOutcome | null>(null)
+  const [qfilterDone, setQfilterDone] = useState(false)
+
+  const handlePick = (s: string) => setSys(s)
+
   const handleDone = (answers: Record<string, string>) => {
     if (!sys) return
-    const b = addCheckin(sys, answers)
-    setBonus(b)
+    const result = addCheckin(sys, answers) as unknown as CheckinOutcome
+    setOutcome({ ...result, qfilterTriggered: result.qfilterTriggered ?? false })
   }
-  const handleMore = () => { setSys(null); setBonus(null) }
+
+  const handleMore = () => {
+    setSys(null)
+    setOutcome(null)
+    setQfilterDone(false)
+  }
 
   // ── Stage 1: 选体系 ──
   if (!sys) {
@@ -36,7 +51,6 @@ export default function Checkin({ onDone, onCancel }: Props) {
           </button>
           <h1 className="text-lg font-bold text-slate-100">今日打卡</h1>
         </div>
-        <p className="text-sm text-slate-500 mb-4">选择要打卡的体系：</p>
         <div className="flex flex-col gap-3">
           {CHECKINS.map(c => (
             <button
@@ -51,7 +65,7 @@ export default function Checkin({ onDone, onCancel }: Props) {
               <div>
                 <div className="font-semibold text-base text-slate-100">{c.label}</div>
                 <div className="text-[12px] text-slate-500 mt-0.5">
-                  {c.questions.filter(q => !q.dependsOn).length}-{c.questions.length} 个问题
+                  {c.questions.length}个问题
                 </div>
               </div>
             </button>
@@ -64,7 +78,7 @@ export default function Checkin({ onDone, onCancel }: Props) {
   const def = CHECKINS.find(d => d.system === sys)!
 
   // ── Stage 2: 答题 ──
-  if (!bonus) {
+  if (!outcome) {
     return (
       <div className="px-4 pt-6 pt-safe max-w-lg mx-auto">
         <button
@@ -79,9 +93,12 @@ export default function Checkin({ onDone, onCancel }: Props) {
   }
 
   // ── Stage 3: 完成 ──
-  const changes = Object.entries(bonus).filter(([, v]) => (v as number) !== 0)
+  const changes = Object.entries(outcome.bonus).filter(([, v]) => v !== 0)
+  const showQFilter = outcome.qfilterTriggered && !!outcome.targetSkill && !qfilterDone
+
   return (
     <div className="px-4 pt-6 pt-safe max-w-lg mx-auto flex flex-col items-center text-center">
+      {/* 完成动画 */}
       <div className="text-6xl mb-3 animate-pop-in">✨</div>
       <h2 className="text-xl font-bold text-slate-100 mb-1">打卡完成！</h2>
       <p className="text-sm text-slate-500 mb-6">{def.label}已记录</p>
@@ -94,8 +111,9 @@ export default function Checkin({ onDone, onCancel }: Props) {
           </h3>
           <div className="space-y-2.5">
             {changes.map(([k, v]) => {
-              const key = k as keyof Attributes
+              const key = k as BaseAttr
               const meta = ATTR_META[key]
+              if (!meta) return null
               const val = v as number
               return (
                 <div key={k} className="flex justify-between items-center">
@@ -118,21 +136,38 @@ export default function Checkin({ onDone, onCancel }: Props) {
         <p className="text-sm text-slate-500 mb-6">今日休息也是一种策略。</p>
       )}
 
-      <button
-        onClick={onDone}
-        className="w-full max-w-xs tap px-4 py-4 bg-amber-500 rounded-2xl
-                   font-bold text-lg text-slate-900
-                   active:scale-[0.97] transition-transform no-select"
-      >
-        返回仪表板
-      </button>
+      {/* QFilter 面板 */}
+      {showQFilter && (
+        <QFilterPanel
+          skill={outcome.targetSkill!}
+          onAnswer={(questionId, answer, responseTime) => {
+            answerQFilter(outcome.targetSkill!, questionId, answer, responseTime)
+            setQfilterDone(true)
+          }}
+          onSkip={() => setQfilterDone(true)}
+        />
+      )}
 
-      <button
-        onClick={handleMore}
-        className="w-full max-w-xs tap px-4 py-3 text-slate-400 mt-3 text-sm no-select"
-      >
-        继续打卡
-      </button>
+      {/* 操作按钮 — QFilter 完成/不触发时显示 */}
+      {!showQFilter && (
+        <>
+          <button
+            onClick={onDone}
+            className="w-full max-w-xs tap px-4 py-4 bg-amber-500 rounded-2xl
+                       font-bold text-lg text-slate-900
+                       active:scale-[0.97] transition-transform no-select"
+          >
+            返回仪表板
+          </button>
+
+          <button
+            onClick={handleMore}
+            className="w-full max-w-xs tap px-4 py-3 text-slate-400 mt-3 text-sm no-select"
+          >
+            继续打卡
+          </button>
+        </>
+      )}
     </div>
   )
 }

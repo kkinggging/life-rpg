@@ -1,12 +1,12 @@
 // ============================================================
 // 量化人生RPG — 仪表板（首页）
 // ============================================================
-import type { Attributes } from '../types'
-import { ATTR_META } from '../types'
 import { useStore } from '../store'
 import AttributeBar from '../components/AttributeBar'
 import ExportImport from '../components/ExportImport'
-import { todayISO, CHECKINS } from '../utils'
+import { BASE_ATTRS, DERIVED_SKILLS } from '../types'
+import type { BaseAttr, DerivedSkill } from '../types'
+import { CHECKINS, todayISO } from '../utils'
 
 interface Props {
   onStartCheckin: () => void
@@ -14,26 +14,29 @@ interface Props {
 
 export default function Dashboard({ onStartCheckin }: Props) {
   const { state } = useStore()
-  const { attributes } = state
-  const attrKeys = Object.keys(attributes) as (keyof Attributes)[]
 
   const today = todayISO()
-  const todayRecs = state.records.filter(r => r.date === today)
+
+  // ── 今日已打卡系统 ──
+  const todayRecs = state.checkinRecords.filter(r => r.date === today)
   const doneSystems = new Set(todayRecs.map(r => r.system))
 
+  // ── 日期格式化：月/日 星期 ──
+  const dateStr = new Date().toLocaleDateString('zh-CN', {
+    month: 'numeric',
+    day: 'numeric',
+    weekday: 'short',
+  })
+
   return (
-    <div className="px-4 pt-6 pt-safe pb-4 max-w-lg mx-auto">
-      {/* ── 顶部 ── */}
-      <div className="flex items-center justify-between mb-1">
-        <h1 className="text-lg font-bold text-slate-100">⚔️ 人生 RPG</h1>
-        <span className="text-xs text-slate-500">
-          {new Date().toLocaleDateString('zh-CN', {
-            month: 'long', day: 'numeric', weekday: 'short',
-          })}
-        </span>
+    <div className="px-4 pt-safe pb-4 max-w-lg mx-auto">
+      {/* ── 顶部：标题 + 日期 ── */}
+      <div className="flex items-center justify-between mb-1 mt-4">
+        <h1 className="text-lg font-bold text-slate-100">⚔️ 个人 OS</h1>
+        <span className="text-xs text-slate-500">{dateStr}</span>
       </div>
 
-      {/* ── 今日状态条 ── */}
+      {/* ── 今日打卡状态条 ── */}
       <div className="flex flex-wrap gap-2 mb-5 mt-2">
         {CHECKINS.map(c => {
           const done = doneSystems.has(c.system)
@@ -50,19 +53,40 @@ export default function Dashboard({ onStartCheckin }: Props) {
             </span>
           )
         })}
-        <span className="text-[11px] px-2.5 py-1 rounded-full bg-slate-800 text-slate-500 border border-slate-700/30">
-          📋 {state.records.length} 次记录
-        </span>
       </div>
 
-      {/* ── 属性面板 ── */}
+      {/* ── 基础属性 ── */}
       <div className="bg-slate-800/80 rounded-2xl p-4 mb-4 border border-slate-700/30">
         <h2 className="text-xs font-medium text-slate-500 mb-3 uppercase tracking-wide">
-          属性面板
+          基础属性
         </h2>
-        {attrKeys.map(k => (
-          <AttributeBar key={k} name={k} value={attributes[k]} />
-        ))}
+        <div className="divide-y divide-slate-700/30">
+          {BASE_ATTRS.map((attr: BaseAttr) => (
+            <AttributeBar
+              key={attr}
+              name={attr}
+              value={state.baseAttrs[attr]}
+              type="base"
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* ── 衍生技能 ── */}
+      <div className="bg-slate-800/80 rounded-2xl p-4 mb-4 border border-slate-700/30">
+        <h2 className="text-xs font-medium text-slate-500 mb-3 uppercase tracking-wide">
+          衍生技能
+        </h2>
+        <div className="divide-y divide-slate-700/30">
+          {DERIVED_SKILLS.map((skill: DerivedSkill) => (
+            <AttributeBar
+              key={skill}
+              name={skill}
+              value={state.derivedSkills[skill]}
+              type="derived"
+            />
+          ))}
+        </div>
       </div>
 
       {/* ── 打卡主按钮 ── */}
@@ -76,6 +100,17 @@ export default function Dashboard({ onStartCheckin }: Props) {
       >
         ✍️ 今日打卡
       </button>
+
+      {/* ── 统计信息 ── */}
+      <div className="flex items-center justify-center gap-4 mb-4">
+        <span className="text-[11px] text-slate-500">
+          掌控感阻尼: 1.00
+        </span>
+        <span className="text-slate-700">·</span>
+        <span className="text-[11px] text-slate-500">
+          📋 {state.checkinRecords.length} 次记录
+        </span>
+      </div>
 
       {/* ── 导出/导入 ── */}
       <ExportImport />

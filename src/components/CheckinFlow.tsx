@@ -2,16 +2,15 @@
 // 量化人生RPG — 打卡问答流
 // ============================================================
 import { useState, useMemo } from 'react'
-import type { CheckinSystem } from '../types'
-import { CHECKINS, type Question } from '../utils'
+import { CHECKINS, type CheckinDef, type Question } from '../utils'
 
 interface Props {
-  system: CheckinSystem
+  system: string
   onDone: (answers: Record<string, string>) => void
 }
 
 export default function CheckinFlow({ system, onDone }: Props) {
-  const def = CHECKINS.find(d => d.system === system)!
+  const def: CheckinDef = CHECKINS.find(d => d.system === system)!
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [idx, setIdx] = useState(0)
 
@@ -24,8 +23,8 @@ export default function CheckinFlow({ system, onDone }: Props) {
     [answers, def],
   )
 
-  const q = visible[idx]
-  const isLast = idx >= visible.length - 1
+  const q: Question = visible[idx]
+  const isLast: boolean = idx >= visible.length - 1
 
   const pick = (val: string) => {
     const next = { ...answers, [q.id]: val }
@@ -46,13 +45,16 @@ export default function CheckinFlow({ system, onDone }: Props) {
 
   return (
     <div className="flex flex-col">
-      {/* 进度头部 */}
-      <div className="flex items-center gap-2 mb-5">
+      {/* 顶部：体系图标 + 标签 */}
+      <div className="flex items-center gap-2 mb-4">
         <span className="text-2xl">{def.emoji}</span>
-        <span className="text-sm text-slate-400">
-          {def.label} · {idx + 1}/{visible.length}
-        </span>
+        <span className="text-sm text-slate-400">{def.label}</span>
       </div>
+
+      {/* 步骤进度 */}
+      <p className="text-xs text-slate-500 mb-5">
+        第 {idx + 1}/{visible.length} 问
+      </p>
 
       {/* 进度条 */}
       <div className="h-1 bg-slate-700/60 rounded-full mb-6 overflow-hidden">
@@ -65,19 +67,19 @@ export default function CheckinFlow({ system, onDone }: Props) {
         />
       </div>
 
-      {/* 问题 */}
+      {/* 当前问题 */}
       <h2 className="text-lg font-semibold mb-5 text-center text-slate-100 px-2">
         {q.text}
       </h2>
 
-      {/* 选项 */}
+      {/* 选项按钮 */}
       <div className="flex flex-col gap-2.5">
         {q.options.map(opt => (
           <button
             key={opt.value}
             onClick={() => pick(opt.value)}
-            className="tap flex items-center gap-4 px-4 py-4 bg-slate-800
-                       rounded-xl border border-slate-700/80
+            className="tap flex items-center gap-4 px-4 py-3 min-h-[48px]
+                       bg-slate-800 rounded-xl border border-slate-700/80
                        active:border-amber-500/60 active:bg-slate-700/80
                        transition-all text-left no-select"
           >

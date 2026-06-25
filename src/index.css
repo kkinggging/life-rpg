@@ -49,3 +49,78 @@ html, body {
 .animate-pop-in {
   animation: pop-in 0.4s ease-out;
 }
+
+/* ── 暗色主题滚动条 ── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0f172a; /* slate-900 */
+}
+
+::-webkit-scrollbar-thumb {
+  background: #475569; /* slate-600 */
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #64748b; /* slate-500 */
+}
+
+/* Firefox 滚动条 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #475569 #0f172a;
+}
+
+/* ── 校准滑块（琥珀色强调）── */
+input[type="range"].calibrate {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 8px;
+  border-radius: 4px;
+  background: #334155; /* slate-700 */
+  outline: none;
+  cursor: pointer;
+}
+
+input[type="range"].calibrate::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #f59e0b; /* amber-500 */
+  border: 2px solid #fbbf24; /* amber-400 */
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.5);
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+input[type="range"].calibrate::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+input[type="range"].calibrate::-webkit-slider-thumb:active {
+  transform: scale(1.1);
+  background: #d97706; /* amber-600 */
+}
+
+input[type="range"].calibrate::-moz-range-thumb {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #f59e0b; /* amber-500 */
+  border: 2px solid #fbbf24; /* amber-400 */
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.5);
+  cursor: pointer;
+}
+
+input[type="range"].calibrate::-moz-range-track {
+  height: 8px;
+  border-radius: 4px;
+  background: #334155; /* slate-700 */
+}
