@@ -92,9 +92,9 @@ export const SKILL_DEFS: DerivedSkillDef[] = [
 //    Q_filter < 75 → 减半至 0.05（心智未整合，放缓）
 // ---------------------------------------------------------------------------
 
-const BASE_CONVERGENCE = 0.10;
-const QFILTER_HIGH_CONVERGENCE = 0.20;
-const QFILTER_LOW_CONVERGENCE = 0.05;
+const BASE_CONVERGENCE = 0.03;
+const QFILTER_HIGH_CONVERGENCE = 0.06;
+const QFILTER_LOW_CONVERGENCE = 0.015;
 
 // ---------------------------------------------------------------------------
 // 辅助

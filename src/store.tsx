@@ -14,7 +14,7 @@ import type {
   BlackBox,
 } from './types'
 import { tierMultiplier, DEFAULT_DERIVED_SKILLS } from './types'
-import { calcAllDerivedSkills, calcGamma, bufferPoolCheck } from './math'
+import { calcAllDerivedSkills, calcGamma } from './math'
 import { pickRandomQuestion, getConfidence, QUESTIONS } from './qfilter'
 import { CHECKINS, uid, todayISO } from './utils'
 import type { CheckinDef } from './utils'
@@ -209,10 +209,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const baseAttrDelta: Partial<BaseAttrs> = {}
       for (const [k, v] of Object.entries(rawDelta)) {
         if (BASE_ATTR_KEYS.has(k) && typeof v === 'number' && v !== 0) {
-          // FIX: Clamp raw deltas to spec range [-2.0, 2.0]
-          // Learning deep+core = 2.5, social charm+state=3 = 2.5, abstinence relapse = -3.0
-          // all exceed the 0.5~2.0 range per tech-spec §4.1
-          ;(baseAttrDelta as Record<string, number>)[k] = Math.max(-2.0, Math.min(2.0, v))
+          // Clamp raw deltas to ±1.0 — 健身增长应以月计量
+          ;(baseAttrDelta as Record<string, number>)[k] = Math.max(-1.0, Math.min(1.0, v))
         }
       }
 
@@ -227,22 +225,26 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const intermediate: AppState = { ...state, baseAttrs: newBaseAttrs }
       const { skills: previewDerived } = calcAllDerivedSkills(intermediate)
 
-      // 3. 检查缓冲池 — 是否触发 QFilter
+      // 3. QFilter 随机触发 — 20% 概率，与打卡体系联动选相关技能
       let qfilterPending: QFilterPending | null = null
-      const { pools: currentPools } = calcAllDerivedSkills(intermediate)
-      for (const pool of currentPools) {
-        const check = bufferPoolCheck(pool.skill, pool.accumulated, pool.threshold)
-        if (check.triggered && Math.random() < 0.4) {
-          const q = pickRandomQuestion(pool.skill)
-          if (q) {
-            qfilterPending = {
-              skill: pool.skill,
-              questionId: q.id,
-              dimension: q.dimension,
-              questionText: q.text,
-              options: q.options,
-            }
-            break
+      if (Math.random() < 0.20) {
+        // 优选与当前打卡体系最相关的衍生技能
+        const skillMap: Record<string, DerivedSkill> = {
+          diet: 'mastery',
+          fitness: 'flow',
+          social: 'behavioralCues',
+          learning: 'opportunity',
+          abstinence: 'macroControl',
+        }
+        const targetSkill: DerivedSkill = skillMap[systemId] ?? 'mastery'
+        const q = pickRandomQuestion(targetSkill)
+        if (q) {
+          qfilterPending = {
+            skill: targetSkill,
+            questionId: q.id,
+            dimension: q.dimension,
+            questionText: q.text,
+            options: q.options.map(o => ({ label: o.label, value: o.value, icon: o.icon })),
           }
         }
       }
