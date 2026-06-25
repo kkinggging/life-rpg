@@ -16,43 +16,68 @@ export default function CheckinFlow({ system, onDone }: Props) {
   const [locking, setLocking] = useState(false)
   const doneRef = useRef(false)
 
-  // 根据依赖过滤可见问题
-  const visible: Question[] = useMemo(
-    () => def.questions.filter(q => {
-      if (!q.dependsOn) return true
-      return q.dependsOn.matches.includes(answers[q.dependsOn.questionId] || '')
-    }),
-    [answers, def],
-  )
+  // 已走的路径：线性遍历全量 def.questions，跳过不满足依赖的
+  // 而非只过滤 visible —— 解决 dependsOn 题型首问即终的 bug
+  const path: Question[] = useMemo(() => {
+    const result: Question[] = []
+    const currentAnswers: Record<string, string> = {}
+    // 把当前已有答案回填，用于 forward-looking 依赖判断
+    for (const [k, v] of Object.entries(answers)) currentAnswers[k] = v
+    for (const q of def.questions) {
+      if (!q.dependsOn) {
+        result.push(q)
+        continue
+      }
+      const depsOk = q.dependsOn.matches.includes(currentAnswers[q.dependsOn.questionId] ?? '')
+      if (depsOk) result.push(q)
+    }
+    return result
+  }, [answers, def.questions])
 
-  const q: Question = visible[idx]
-  const isLast: boolean = idx >= visible.length - 1
+  const q = path[idx]
+  const isLast = idx >= path.length - 1
+
+  // 如果 Q1 选了某答案后 path 扩展出新题，但 idx 还没变 — 需要触发递进
+  // 通过把递进逻辑放在 effect 中处理（但最简单的是在 pick 中处理）
 
   const pick = useCallback((val: string) => {
-    // 防止重复点击
-    if (locking) return
+    if (locking || doneRef.current) return
     setLocking(true)
 
+    // 1. 写入答案
     const next = { ...answers, [q.id]: val }
     setAnswers(next)
 
-    if (isLast) {
-      if (doneRef.current) return
+    // 2. 计算写上这个答案后，接下来还有没有可见的问题
+    //    用 def.questions 全量扫描，和 path 的过滤逻辑一致
+    const projected: Question[] = []
+    for (const qq of def.questions) {
+      if (!qq.dependsOn) { projected.push(qq); continue }
+      // qq 依赖的 question 当前答案（可能在 next 中）
+      const depVal = next[qq.dependsOn.questionId] ?? ''
+      if (qq.dependsOn.matches.includes(depVal)) projected.push(qq)
+    }
+    // 当前 idx 指向的是刚回答完的题，如果 projected 后面还有题则递进
+    const hasNext = idx + 1 < projected.length
+
+    if (!hasNext) {
+      // 真的到头了 —— 收工
       doneRef.current = true
-      // 收集完整答案（包含默认值的隐藏问题）
       const full: Record<string, string> = {}
       for (const qq of def.questions) {
         full[qq.id] = next[qq.id] ?? ''
       }
-      // 短延迟给用户看回答效果
-      setTimeout(() => onDone(full), 250)
+      setTimeout(() => onDone(full), 350)
     } else {
       setTimeout(() => {
         setIdx(i => i + 1)
         setLocking(false)
       }, 200)
     }
-  }, [locking, answers, q, isLast, def.questions, onDone, idx])
+  }, [locking, answers, q, idx, def.questions, onDone])
+
+  // 当前问题文本
+  const totalSteps = path.length
 
   return (
     <div className="flex flex-col">
@@ -64,7 +89,7 @@ export default function CheckinFlow({ system, onDone }: Props) {
 
       {/* 步骤进度 */}
       <p className="text-xs text-slate-500 mb-1">
-        第 {idx + 1}/{visible.length} 问
+        第 {idx + 1}/{totalSteps} 问
       </p>
 
       {/* 进度条 */}
@@ -72,14 +97,14 @@ export default function CheckinFlow({ system, onDone }: Props) {
         <div
           className="h-full rounded-full transition-all duration-300"
           style={{
-            width: `${((idx + 1) / visible.length) * 100}%`,
+            width: `${((idx + 1) / totalSteps) * 100}%`,
             backgroundColor: def.color,
           }}
         />
       </div>
 
       {/* 当前问题 */}
-      <h2 className="text-lg font-semibold mb-5 text-slate-100 px-2">
+      <h2 className="text-lg font-semibold mb-5 text-slate-100 px-2 leading-relaxed">
         {q.text}
       </h2>
 
@@ -102,7 +127,7 @@ export default function CheckinFlow({ system, onDone }: Props) {
         ))}
       </div>
 
-      {/* 回答反馈 — 选完后短暂显示 */}
+      {/* 回答反馈 */}
       {locking && (
         <div className="mt-4 py-3 px-4 bg-slate-800/60 rounded-xl border border-amber-500/30
                         text-center text-sm text-amber-400 animate-pop-in">
