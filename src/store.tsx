@@ -1,5 +1,5 @@
 // ============================================================
-// Personal OS RPG — 全局状态管理
+// Personal OS RPG — 全局状态管理 v6
 // ============================================================
 import React, { createContext, useContext, useReducer, useEffect, useCallback } from 'react'
 import type {
@@ -12,10 +12,9 @@ import type {
   QFilterRecord,
   BufferPool,
   BlackBox,
-  BlindTestResult,
 } from './types'
-import { tierMultiplier, ATTR_MILESTONES, SKILL_MILESTONES } from './types'
-import { calcAllDerivedSkills, calcGamma, calcLambda, SKILL_DEFS, bufferPoolCheck } from './math'
+import { tierMultiplier } from './types'
+import { calcAllDerivedSkills, calcGamma, bufferPoolCheck } from './math'
 import { pickRandomQuestion, getConfidence, QUESTIONS } from './qfilter'
 import { CHECKINS, uid, todayISO } from './utils'
 import type { CheckinDef } from './utils'
@@ -27,43 +26,25 @@ import type { CheckinDef } from './utils'
 const STORAGE_KEY = 'life-rpg-state'
 
 const BASE_ATTR_KEYS: ReadonlySet<string> = new Set([
-  'charm',
-  'strength',
-  'intellect',
-  'social',
-  'willpower',
-  'health',
-  'courage',
-  'abstinence',
+  'charm', 'strength', 'intellect', 'social',
+  'willpower', 'health', 'courage', 'abstinence',
 ])
 
 // ============================================================
-// Initial State — 衍生技能从基础属性计算，不写死
+// Initial State
 // ============================================================
 
 const INITIAL_BASE_ATTRS: BaseAttrs = {
-  charm: 25,
-  strength: 25,
-  intellect: 35,
-  social: 25,
-  willpower: 25,
-  health: 25,
-  courage: 25,
-  abstinence: 20,
+  charm: 25, strength: 25, intellect: 35, social: 25,
+  willpower: 25, health: 25, courage: 25, abstinence: 20,
 }
 
-/** 根据基础属性计算衍生技能的初始值 */
 function computeInitialDerived(base: BaseAttrs): DerivedSkills {
   const mock: AppState = {
     baseAttrs: base,
     derivedSkills: {} as DerivedSkills,
-    checkinRecords: [],
-    qfilterRecords: [],
-    bufferPools: [],
-    blackBoxes: [],
-    lastBackup: null,
-    daysSinceFirstUse: 0,
-    blindTestResults: [],
+    checkinRecords: [], qfilterRecords: [], bufferPools: [],
+    blackBoxes: [], lastBackup: null, daysSinceFirstUse: 0, blindTestResults: [],
   }
   const { skills } = calcAllDerivedSkills(mock)
   return skills
@@ -74,17 +55,12 @@ const INITIAL_DERIVED_SKILLS = computeInitialDerived(INITIAL_BASE_ATTRS)
 const INITIAL_STATE: AppState = {
   baseAttrs: { ...INITIAL_BASE_ATTRS },
   derivedSkills: { ...INITIAL_DERIVED_SKILLS },
-  checkinRecords: [],
-  qfilterRecords: [],
-  bufferPools: [],
-  blackBoxes: [],
-  lastBackup: null,
-  daysSinceFirstUse: 0,
-  blindTestResults: [],
+  checkinRecords: [], qfilterRecords: [], bufferPools: [],
+  blackBoxes: [], lastBackup: null, daysSinceFirstUse: 0, blindTestResults: [],
 }
 
 // ============================================================
-// localStorage 持久化 — 加载后重算衍生技能以保证一致性
+// Persistence
 // ============================================================
 
 function loadState(): AppState {
@@ -93,24 +69,21 @@ function loadState(): AppState {
     if (raw) {
       const parsed = JSON.parse(raw) as AppState
       if (parsed.baseAttrs) {
-        // 始终从基础属性重算衍生技能，杜绝写死值残留
-        const mock: AppState = { ...parsed, checkinRecords: parsed.checkinRecords ?? [], qfilterRecords: parsed.qfilterRecords ?? [], bufferPools: [], blackBoxes: [], blindTestResults: [] }
+        const mock: AppState = { ...parsed, bufferPools: [] }
         const { skills } = calcAllDerivedSkills(mock)
         return { ...parsed, derivedSkills: skills }
       }
     }
-  } catch {
-    /* corrupt storage — fall through to default */
+  } catch { /* corrupt */ }
+  return {
+    ...INITIAL_STATE,
+    baseAttrs: { ...INITIAL_BASE_ATTRS },
+    derivedSkills: { ...INITIAL_DERIVED_SKILLS },
   }
-  return { ...INITIAL_STATE, baseAttrs: { ...INITIAL_BASE_ATTRS }, derivedSkills: { ...INITIAL_DERIVED_SKILLS } }
 }
 
 function saveState(s: AppState): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(s))
-  } catch {
-    /* quota exceeded — silently ignore */
-  }
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)) } catch { /* quota */ }
 }
 
 // ============================================================
@@ -118,124 +91,54 @@ function saveState(s: AppState): void {
 // ============================================================
 
 type Action =
-  | { type: 'CHECKIN'; record: CheckinRecord; baseAttrDelta: Partial<BaseAttrs> }
-  | { type: 'RECALC_DERIVED' }
-  | { type: 'QFILTER_ANSWER'; record: QFilterRecord }
-  | { type: 'BLACKBOX_CHECK'; blackBox: BlackBox }
+  | { type: 'CHECKIN'; record: CheckinRecord; baseAttrDelta: Partial<BaseAttrs>; qFilterBonuses?: Partial<Record<DerivedSkill, number>> }
+  | { type: 'QFILTER_SAVE'; record: QFilterRecord }
   | { type: 'IMPORT'; state: AppState }
   | { type: 'MARK_BACKUP' }
-  | { type: 'INCREMENT_DAY' }
 
 function reducer(s: AppState, a: Action): AppState {
   switch (a.type) {
-    // ----------------------------------------------------------
-    // CHECKIN — 打卡
-    //   1. 应用 tierMultiplier 更新基础属性
-    //   2. 创建打卡记录
-    //   3. 重新结算所有衍生技能 + 缓冲池
-    // ----------------------------------------------------------
     case 'CHECKIN': {
-      // --- 更新基础属性（应用分段倍率）---
       const attrs = { ...s.baseAttrs }
       for (const [k, v] of Object.entries(a.baseAttrDelta)) {
         if (v === undefined || v === 0) continue
         if (!BASE_ATTR_KEYS.has(k)) continue
         const key = k as keyof BaseAttrs
         const multi = tierMultiplier(attrs[key])
-        const delta = v * multi
-        attrs[key] = Math.max(
-          0,
-          Math.min(100, Math.round((attrs[key] + delta) * 10) / 10),
-        )
+        attrs[key] = Math.max(0, Math.min(100, Math.round((attrs[key] + v * multi) * 10) / 10))
       }
 
-      // --- 构建中间态（基础属性已更新，记录已追加）---
       const intermediate: AppState = {
-        ...s,
-        baseAttrs: attrs,
+        ...s, baseAttrs: attrs,
         checkinRecords: [...s.checkinRecords, a.record],
       }
 
-      // --- 重新结算衍生技能 ---
-      const { skills, pools } = calcAllDerivedSkills(intermediate)
+      const { skills, pools } = calcAllDerivedSkills(intermediate, a.qFilterBonuses)
 
-      return {
-        ...intermediate,
-        derivedSkills: skills,
-        bufferPools: pools,
-      }
-    }
-
-    // ----------------------------------------------------------
-    // RECALC_DERIVED — 独立重算衍生技能
-    // ----------------------------------------------------------
-    case 'RECALC_DERIVED': {
-      const { skills, pools } = calcAllDerivedSkills(s)
-      return {
-        ...s,
-        derivedSkills: skills,
-        bufferPools: pools,
-      }
-    }
-
-    // ----------------------------------------------------------
-    // QFILTER_ANSWER — Q-filter 答题
-    //   记录答案；若置信度 >= 0.75 则触发衍生技能重算
-    // ----------------------------------------------------------
-    case 'QFILTER_ANSWER': {
-      const nextState: AppState = {
-        ...s,
-        qfilterRecords: [...s.qfilterRecords, a.record],
-      }
-
-      if (a.record.confidence >= 0.75) {
-        const { skills, pools } = calcAllDerivedSkills(nextState)
+      // 合并缓冲池
+      const mergedPools: BufferPool[] = pools.map(p => {
+        const old = s.bufferPools.find(o => o.skill === p.skill)
+        if (!old) return p
         return {
-          ...nextState,
-          derivedSkills: skills,
-          bufferPools: pools,
+          ...p,
+          accumulated: (old.accumulated ?? 0) + (p.accumulated ?? 0),
         }
-      }
+      })
 
-      return nextState
+      return { ...intermediate, derivedSkills: skills, bufferPools: mergedPools }
     }
 
-    // ----------------------------------------------------------
-    // BLACKBOX_CHECK — 黑盒检测记录
-    // ----------------------------------------------------------
-    case 'BLACKBOX_CHECK': {
-      return {
-        ...s,
-        blackBoxes: [...s.blackBoxes, a.blackBox],
-      }
+    case 'QFILTER_SAVE': {
+      return { ...s, qfilterRecords: [...s.qfilterRecords, a.record] }
     }
 
-    // ----------------------------------------------------------
-    // IMPORT — 全量导入状态，重算衍生技能确保与基础属性一致
-    // ----------------------------------------------------------
     case 'IMPORT': {
       const { skills } = calcAllDerivedSkills(a.state)
       return { ...a.state, derivedSkills: skills }
     }
 
-    // ----------------------------------------------------------
-    // MARK_BACKUP — 更新上次备份时间
-    // ----------------------------------------------------------
     case 'MARK_BACKUP': {
-      return {
-        ...s,
-        lastBackup: new Date().toISOString(),
-      }
-    }
-
-    // ----------------------------------------------------------
-    // INCREMENT_DAY — 使用天数 +1
-    // ----------------------------------------------------------
-    case 'INCREMENT_DAY': {
-      return {
-        ...s,
-        daysSinceFirstUse: s.daysSinceFirstUse + 1,
-      }
+      return { ...s, lastBackup: new Date().toISOString() }
     }
 
     default:
@@ -244,26 +147,32 @@ function reducer(s: AppState, a: Action): AppState {
 }
 
 // ============================================================
-// Context
+// Context Types
 // ============================================================
 
-interface CheckinResult {
+export interface QFilterPending {
+  skill: DerivedSkill
+  questionId: string
+  dimension: string
+  questionText: string
+  options: { label: string; value: number; icon: string }[]
+}
+
+export interface CheckinResult {
   bonus: Partial<BaseAttrs>
   previousDerived: DerivedSkills
   newDerived: DerivedSkills
-  qfilterTriggered: boolean
+  qfilterPending: QFilterPending | null
 }
 
 interface StoreContext {
   state: AppState
   addCheckin: (systemId: string, answers: Record<string, string>) => CheckinResult | null
   answerQFilter: (
-    skillId: DerivedSkill,
-    questionId: string,
+    pending: QFilterPending,
     answer: number,
     responseTime: number,
   ) => void
-  triggerBlackBoxCheck: (skillId: DerivedSkill) => void
   exportJSON: () => string
   importJSON: (json: string) => boolean
   markBackup: () => void
@@ -277,28 +186,12 @@ const Ctx = createContext<StoreContext | null>(null)
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(reducer, null, loadState)
+  const pendingQFilterRef = React.useRef<{ skill: DerivedSkill; answer: number; questionId: string } | null>(null)
 
-  // --- 每次 state 变化自动写入 localStorage ---
-  useEffect(() => {
-    saveState(state)
-  }, [state])
+  useEffect(() => { saveState(state) }, [state])
 
-  // --- 缓冲池触发（state.bufferPools 更新后检查是否需弹出 QFilter）---
-  useEffect(() => {
-    for (const pool of state.bufferPools) {
-      const check = bufferPoolCheck(pool.skill, pool.accumulated, pool.threshold)
-      if (check.triggered && Math.random() < 0.4) {
-        // 随机抽取一题 — 由 UI 层另行消费；此处仅保留抽取逻辑
-        pickRandomQuestion(pool.skill)
-      }
-    }
-  }, [state.bufferPools])
-
-  // ==========================================================
-  // addCheckin — 返回反馈对象供 UI 展示
-  // ==========================================================
   const addCheckin = useCallback(
-    (systemId: string, answers: Record<string, string>) => {
+    (systemId: string, answers: Record<string, string>): CheckinResult | null => {
       const def = CHECKINS.find((d: CheckinDef) => d.system === systemId)
       if (!def) return null
 
@@ -311,7 +204,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      // 2. 预计算新状态（同步，用于即时 UI 反馈）
+      // 2. 预计算（同步，供 UI 即时反馈 — 无 QFilter）
       const prevDerived = { ...state.derivedSkills }
       const newBaseAttrs = { ...state.baseAttrs }
       for (const [k, v] of Object.entries(baseAttrDelta)) {
@@ -320,96 +213,74 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         newBaseAttrs[key] = Math.max(0, Math.min(100, Math.round((newBaseAttrs[key] + v * multi) * 10) / 10))
       }
       const intermediate: AppState = { ...state, baseAttrs: newBaseAttrs }
-      const { skills: newDerived } = calcAllDerivedSkills(intermediate)
+      const { skills: previewDerived } = calcAllDerivedSkills(intermediate)
 
-      // 3. 派发 CHECKIN
+      // 3. 检查缓冲池 — 是否触发 QFilter
+      let qfilterPending: QFilterPending | null = null
+      const { pools: currentPools } = calcAllDerivedSkills(intermediate)
+      for (const pool of currentPools) {
+        const check = bufferPoolCheck(pool.skill, pool.accumulated, pool.threshold)
+        if (check.triggered && Math.random() < 0.4) {
+          const q = pickRandomQuestion(pool.skill)
+          if (q) {
+            qfilterPending = {
+              skill: pool.skill,
+              questionId: q.id,
+              dimension: q.dimension,
+              questionText: q.text,
+              options: q.options,
+            }
+            pendingQFilterRef.current = { skill: pool.skill, answer: 0, questionId: q.id }
+            break
+          }
+        }
+      }
+
+      // 4. 派发 CHECKIN（无 QFilter 修正）
       const record: CheckinRecord = {
-        id: uid(),
-        date: todayISO(),
+        id: uid(), date: todayISO(),
         system: systemId as CheckinRecord['system'],
-        answers,
-        baseAttrDelta,
+        answers, baseAttrDelta,
       }
-      dispatch({ type: 'CHECKIN', record, baseAttrDelta })
+      dispatch({ type: 'CHECKIN', record, baseAttrDelta, qFilterBonuses: undefined })
 
-      // 4. 返回值给 UI
-      return {
-        bonus: baseAttrDelta,
-        previousDerived: prevDerived,
-        newDerived,
-        qfilterTriggered: false,
-      }
+      return { bonus: baseAttrDelta, previousDerived: prevDerived, newDerived: previewDerived, qfilterPending }
     },
     [state],
   )
 
-  // ==========================================================
-  // answerQFilter
-  // ==========================================================
   const answerQFilter = useCallback(
-    (
-      skillId: DerivedSkill,
-      questionId: string,
-      answer: number,
-      responseTime: number,
-    ) => {
-      // 从题库中查找题目以获取 dimension
-      const question = QUESTIONS.find((q) => q.id === questionId)
+    (pending: QFilterPending, answer: number, responseTime: number) => {
       const confidence = getConfidence(responseTime)
-
       const record: QFilterRecord = {
-        id: uid(),
-        date: todayISO(),
-        targetSkill: skillId,
-        dimension: question?.dimension ?? '',
-        questionVariant: questionId,
-        answer,
-        responseTime,
-        confidence,
+        id: uid(), date: todayISO(),
+        targetSkill: pending.skill,
+        dimension: pending.dimension,
+        questionVariant: pending.questionId,
+        answer: answer * (confidence < 1.0 ? 0.7 : 1.0), // 低信度衰减
+        responseTime, confidence,
       }
 
-      dispatch({ type: 'QFILTER_ANSWER', record })
+      // 存入记录
+      dispatch({ type: 'QFILTER_SAVE', record })
+
+      // 用 QFilter 得分重新结算衍生技能
+      const qFilterBonuses: Partial<Record<DerivedSkill, number>> = {
+        [pending.skill]: answer,
+      }
+      // 构造一个虚拟的 CHECKIN action 触发重算
+      // 直接调用 recalc via empty delta
+      const emptyDelta: Partial<BaseAttrs> = {}
+      const dummyRecord: CheckinRecord = {
+        id: uid(), date: todayISO(), system: 'diet' as any,
+        answers: {}, baseAttrDelta: emptyDelta,
+      }
+      dispatch({ type: 'CHECKIN', record: dummyRecord, baseAttrDelta: emptyDelta, qFilterBonuses })
     },
     [],
   )
 
-  // ==========================================================
-  // triggerBlackBoxCheck
-  // ==========================================================
-  const triggerBlackBoxCheck = useCallback(
-    (skillId: DerivedSkill) => {
-      const currentVal = state.derivedSkills[skillId]
-      const boundary = currentVal
-      const flags: string[] = []
-
-      if (currentVal < 25) flags.push('critically_low')
-      else if (currentVal < 40) flags.push('below_average')
-      if (currentVal >= 80) flags.push('elite')
-
-      let verdict: BlackBox['verdict'] = 'stable'
-      if (currentVal < 20) verdict = 'degrading'
-      else if (currentVal >= 90) verdict = 'breakthrough'
-
-      const blackBox: BlackBox = {
-        skill: skillId,
-        boundary,
-        startDate: todayISO(),
-        endDate: new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
-        flags,
-        verdict,
-      }
-
-      dispatch({ type: 'BLACKBOX_CHECK', blackBox })
-    },
-    [state.derivedSkills],
-  )
-
-  // ==========================================================
-  // exportJSON / importJSON / markBackup
-  // ==========================================================
-  const exportJSON = useCallback((): string => {
-    return JSON.stringify(state, null, 2)
-  }, [state])
+  const exportJSON = useCallback((): string => JSON.stringify(state, null, 2), [state])
 
   const importJSON = useCallback((json: string): boolean => {
     try {
@@ -417,38 +288,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (!parsed.baseAttrs || !parsed.derivedSkills) return false
       dispatch({ type: 'IMPORT', state: parsed })
       return true
-    } catch {
-      return false
-    }
+    } catch { return false }
   }, [])
 
-  const markBackup = useCallback(() => {
-    dispatch({ type: 'MARK_BACKUP' })
-  }, [])
+  const markBackup = useCallback(() => dispatch({ type: 'MARK_BACKUP' }), [])
 
-  // ==========================================================
-  // Render
-  // ==========================================================
   return (
-    <Ctx.Provider
-      value={{
-        state,
-        addCheckin,
-        answerQFilter,
-        triggerBlackBoxCheck,
-        exportJSON,
-        importJSON,
-        markBackup,
-      }}
-    >
+    <Ctx.Provider value={{ state, addCheckin, answerQFilter, exportJSON, importJSON, markBackup }}>
       {children}
     </Ctx.Provider>
   )
 }
-
-// ============================================================
-// Hook
-// ============================================================
 
 export function useStore(): StoreContext {
   const ctx = useContext(Ctx)

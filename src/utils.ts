@@ -1,20 +1,21 @@
 // ============================================================
-// Personal OS RPG — 工具函数 & 打卡定义
+// Personal OS RPG — 打卡体系定义
 // ============================================================
-import { BaseAttr, BASE_ATTRS, type BaseAttrs } from './types'
-import { pickRandomQuestion } from './qfilter'
+// v6 变更：原始增量从 5-10 缩至 0.5-2，确保从 50→80 需要 1-3 月
+// 配合 tierMultiplier（60-80 段 ×0.6，80-95 段 ×0.25）
+// ============================================================
 
-// --- ID ---
+import { type BaseAttrs } from './types'
+
+// --- ID / 日期 ---
 export function uid(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
 }
 
-// --- 日期 ---
 export function todayISO(): string {
   return new Date().toISOString().split('T')[0]
 }
 
-/** 本周一 00:00 → 本周日 23:59 */
 export function thisWeekRange(): { start: Date; end: Date } {
   const now = new Date()
   const day = now.getDay()
@@ -26,12 +27,11 @@ export function thisWeekRange(): { start: Date; end: Date } {
   return { start: mon, end: sun }
 }
 
-// --- 问题定义 ---
+// --- 问题类型 ---
 export interface Question {
   id: string
   text: string
   options: { label: string; value: string; icon: string }[]
-  /** 仅当 dependsOn.questionId 的答案在 matches 中时才显示 */
   dependsOn?: { questionId: string; matches: string[] }
 }
 
@@ -45,7 +45,7 @@ export interface CheckinDef {
 }
 
 // ============================================================
-// 五大打卡体系
+// 五大打卡体系（原始增量 0.5-2）
 // ============================================================
 export const CHECKINS: CheckinDef[] = [
 
@@ -77,13 +77,13 @@ export const CHECKINS: CheckinDef[] = [
       },
     ],
     calcBonus(a) {
-      const b: Partial<BaseAttrs> = { health: 0, abstinence: 0, willpower: 0 }
-      if (a.meal === 'good')  { b.health = 5;  b.abstinence = 1            }
-      if (a.meal === 'ok')    { b.health = 3                               }
-      if (a.meal === 'skip')  { b.health = 1;  b.willpower = -1            }
-      if (a.meal === 'bad')   { b.health = 0;  b.willpower = -1            }
-      if (a.supp === 'yes')   { b.health! += 3                             }
-      if (a.supp === 'sup')   { b.health! += 2                             }
+      const b: Partial<BaseAttrs> = {}
+      if (a.meal === 'good')  { b.health = 1.5; b.abstinence = 0.3; b.willpower = 0.3 }
+      if (a.meal === 'ok')    { b.health = 0.8 }
+      if (a.meal === 'skip')  { b.health = 0.2; b.willpower = -0.3 }
+      if (a.meal === 'bad')   { b.willpower = -0.5 }
+      if (a.supp === 'yes')   { b.health = (b.health ?? 0) + 0.5 }
+      if (a.supp === 'sup')   { b.health = (b.health ?? 0) + 0.3 }
       return b
     },
   },
@@ -127,21 +127,21 @@ export const CHECKINS: CheckinDef[] = [
       },
     ],
     calcBonus(a) {
-      const b: Partial<BaseAttrs> = { strength: 0, health: 0, willpower: 0 }
+      const b: Partial<BaseAttrs> = {}
       if (a.type === 'rest') return b
 
-      // 类型基础
-      if (a.type === 'strength') { b.strength = 6; b.health = 2; b.willpower = 2 }
-      if (a.type === 'cardio')   { b.strength = 4; b.health = 3; b.willpower = 2 }
-      if (a.type === 'sports')   { b.strength = 4; b.health = 2; b.willpower = 1 }
+      // 基础（类型）
+      if (a.type === 'strength') { b.strength = 1.0; b.health = 0.5; b.willpower = 0.5 }
+      if (a.type === 'cardio')   { b.strength = 0.5; b.health = 1.0; b.willpower = 0.5 }
+      if (a.type === 'sports')   { b.strength = 0.5; b.health = 0.5; b.willpower = 0.3 }
 
       // 强度加成
-      if (a.intensity === 'hard')   { b.strength! += 2; b.health! += 2; b.willpower! += 2 }
-      if (a.intensity === 'medium') { b.strength! += 1; b.health! += 1; b.willpower! += 1 }
+      if (a.intensity === 'hard')   { b.strength = (b.strength ?? 0) + 0.7; b.health = (b.health ?? 0) + 0.3; b.willpower = (b.willpower ?? 0) + 0.5 }
+      if (a.intensity === 'medium') { b.strength = (b.strength ?? 0) + 0.3; b.health = (b.health ?? 0) + 0.2; b.willpower = (b.willpower ?? 0) + 0.2 }
 
       // 时长加成
-      if (a.duration === 'long')   { b.strength! += 2 }
-      if (a.duration === 'medium') { b.strength! += 1 }
+      if (a.duration === 'long')    { b.strength = (b.strength ?? 0) + 0.5 }
+      if (a.duration === 'medium')  { b.strength = (b.strength ?? 0) + 0.2 }
 
       return b
     },
@@ -165,7 +165,6 @@ export const CHECKINS: CheckinDef[] = [
           { label: '无社交',         value: 'none',     icon: '🏠' },
         ],
       },
-      // --- 搭讪专属 ---
       {
         id: 'opener',
         text: '开场方式？',
@@ -198,7 +197,6 @@ export const CHECKINS: CheckinDef[] = [
         ],
         dependsOn: { questionId: 'type', matches: ['approach'] },
       },
-      // --- 非搭讪社交 ---
       {
         id: 'engage',
         text: '你的投入度？',
@@ -211,23 +209,21 @@ export const CHECKINS: CheckinDef[] = [
       },
     ],
     calcBonus(a) {
-      const b: Partial<BaseAttrs> = { charm: 0, social: 0, courage: 0, willpower: 0 }
-      if (a.type === 'none') { b.social = -1; b.willpower = -1; return b }
+      const b: Partial<BaseAttrs> = {}
+      if (a.type === 'none') { b.social = -0.2; return b }
 
       if (a.type === 'approach') {
-        b.courage = 3
-        b.willpower = 1
-        if (a.result === 'number')   { b.charm = 8; b.social = 5                    }
-        if (a.result === 'good')     { b.charm = 5; b.social = 4                    }
-        if (a.result === 'neutral')  { b.charm = 2; b.social = 2                    }
-        if (a.result === 'rejected') { b.charm = 3; b.social = 1; b.courage! += 2   }
-        if (a.state === '3') { b.charm! += 2; b.social! += 1 }
-        if (a.state === '1') { b.charm! -= 1                 }
-        if (a.state === '0') { b.charm! -= 2; b.courage! += 1 }
+        b.courage = 1.5; b.willpower = 0.5
+        if (a.result === 'number')   { b.charm = 2.0; b.social = 1.0 }
+        if (a.result === 'good')     { b.charm = 1.0; b.social = 0.8 }
+        if (a.result === 'neutral')  { b.charm = 0.5; b.social = 0.5 }
+        if (a.result === 'rejected') { b.charm = 0.5; b.social = 0.3; b.courage = (b.courage ?? 0) + 0.5; b.willpower = (b.willpower ?? 0) + 0.5 }
+        if (a.state === '3') { b.charm = (b.charm ?? 0) + 0.5; b.social = (b.social ?? 0) + 0.5 }
+        if (a.state === '0') { b.charm = (b.charm ?? 0) - 0.3; b.willpower = (b.willpower ?? 0) + 0.3 }
       } else {
-        if (a.engage === 'active')  { b.charm = 3; b.social = 4 }
-        if (a.engage === 'normal')  { b.charm = 1; b.social = 2 }
-        if (a.engage === 'passive') { b.social = 1              }
+        if (a.engage === 'active')  { b.charm = 0.5;  b.social = 1.0 }
+        if (a.engage === 'normal')  { b.charm = 0.2;  b.social = 0.5 }
+        if (a.engage === 'passive') { b.social = 0.3 }
       }
       return b
     },
@@ -237,45 +233,37 @@ export const CHECKINS: CheckinDef[] = [
   {
     system: 'learning',
     label: '学习打卡',
-    emoji: '🧠',
+    emoji: '📚',
     color: '#3b82f6',
     questions: [
       {
         id: 'quality',
         text: '今天投入学习的感觉？',
         options: [
-          { label: '高质量深度学习', value: 'deep',    icon: '✨' },
-          { label: '中等投入',       value: 'medium',  icon: '📖' },
-          { label: '低效/走神',      value: 'shallow', icon: '🥱' },
-          { label: '没学',           value: 'none',    icon: '💤' },
+          { label: '高质量深度投入',  value: 'deep',   icon: '🧠' },
+          { label: '中等投入',        value: 'medium', icon: '📖' },
+          { label: '低效/分心',       value: 'low',    icon: '😶' },
+          { label: '今天没学',        value: 'none',   icon: '💤' },
         ],
       },
       {
         id: 'type',
         text: '学习内容类型？',
         options: [
-          { label: '核心能力提升',   value: 'core',    icon: '🎯' },
-          { label: '工作相关',       value: 'work',    icon: '💼' },
-          { label: '泛阅读/资讯',    value: 'reading', icon: '📰' },
-          { label: '无效摄入',       value: 'useless', icon: '🗑️' },
+          { label: '核心能力提升',  value: 'core',    icon: '🎯' },
+          { label: '工作相关',     value: 'work',    icon: '💼' },
+          { label: '兴趣泛读',     value: 'general', icon: '📰' },
         ],
-        dependsOn: { questionId: 'quality', matches: ['deep', 'medium', 'shallow'] },
+        dependsOn: { questionId: 'quality', matches: ['deep', 'medium', 'low'] },
       },
     ],
     calcBonus(a) {
-      const b: Partial<BaseAttrs> = { intellect: 0, willpower: 0 }
-      if (a.quality === 'none') { b.willpower = -1; return b }
-
-      // 质量基础
-      if (a.quality === 'deep')    { b.intellect = 5; b.willpower = 3 }
-      if (a.quality === 'medium')  { b.intellect = 3; b.willpower = 2 }
-      if (a.quality === 'shallow') { b.intellect = 2; b.willpower = 1 }
-
-      // 内容类型加成
-      if (a.type === 'core')    { b.intellect! += 3 }
-      if (a.type === 'work')    { b.intellect! += 2 }
-      if (a.type === 'reading') { b.intellect! += 1 }
-
+      const b: Partial<BaseAttrs> = {}
+      if (a.quality === 'deep')   { b.intellect = 2.0; b.willpower = 1.0 }
+      if (a.quality === 'medium') { b.intellect = 1.0; b.willpower = 0.3 }
+      if (a.quality === 'low')    { b.intellect = 0.3; b.willpower = 0.2 }
+      if (a.quality === 'none')   { b.willpower = -0.3 }
+      if (a.type === 'core')      { b.intellect = (b.intellect ?? 0) + 0.5 }
       return b
     },
   },
@@ -291,33 +279,32 @@ export const CHECKINS: CheckinDef[] = [
         id: 'state',
         text: '今天状态？',
         options: [
-          { label: '成功执行替代行为',   value: 'replaced', icon: '🏆' },
-          { label: '平稳度过',           value: 'calm',     icon: '😌' },
-          { label: '有冲动但控制住了',   value: 'resisted', icon: '💪' },
-          { label: '破戒了',             value: 'relapsed', icon: '💔' },
+          { label: '执行替代行为成功', value: 'alternative', icon: '✨' },
+          { label: '平稳度过',         value: 'steady',      icon: '🧊' },
+          { label: '有冲动但控制住',   value: 'controlled',  icon: '⚡' },
+          { label: '破戒了',           value: 'relapse',     icon: '💔' },
         ],
       },
       {
         id: 'trigger',
         text: '触发场景？',
         options: [
-          { label: '深夜独处',   value: 'late_night', icon: '🌙' },
-          { label: '压力释放',   value: 'stress',     icon: '😫' },
-          { label: '如释重负',   value: 'relief',     icon: '😮‍💨' },
-          { label: '无聊',       value: 'boredom',    icon: '🥱' },
-          { label: '其他',       value: 'other',      icon: '❓' },
+          { label: '深夜独处',   value: 'night',    icon: '🌙' },
+          { label: '压力释放',   value: 'stress',   icon: '😰' },
+          { label: '如释重负',   value: 'relief',   icon: '😮' },
+          { label: '无聊',       value: 'bored',    icon: '🥱' },
+          { label: '其他',       value: 'other',    icon: '❓' },
         ],
-        dependsOn: { questionId: 'state', matches: ['relapsed'] },
+        dependsOn: { questionId: 'state', matches: ['relapse'] },
       },
     ],
     calcBonus(a) {
-      const b: Partial<BaseAttrs> = { abstinence: 0, courage: 0, willpower: 0 }
-      if (a.state === 'replaced')  { b.abstinence = 5;  b.courage = 2;  b.willpower = 4  }
-      if (a.state === 'calm')      { b.abstinence = 3;  b.courage = 1;  b.willpower = 2  }
-      if (a.state === 'resisted')  { b.abstinence = 1;  b.courage = 2;  b.willpower = 3  }
-      if (a.state === 'relapsed')  { b.abstinence = -8; b.courage = -2; b.willpower = -3 }
+      const b: Partial<BaseAttrs> = {}
+      if (a.state === 'alternative') { b.abstinence = 2.0; b.courage = 1.0; b.willpower = 1.0 }
+      if (a.state === 'steady')       { b.abstinence = 1.0; b.willpower = 0.5 }
+      if (a.state === 'controlled')   { b.abstinence = 0.5; b.willpower = 0.8; b.courage = 0.3 }
+      if (a.state === 'relapse')      { b.abstinence = -3.0; b.willpower = -1.0; b.courage = -1.0 }
       return b
     },
   },
-
 ]

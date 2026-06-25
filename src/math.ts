@@ -1,29 +1,29 @@
 // ============================================================
-// Personal OS RPG — 核心数学引擎
+// Personal OS RPG — 核心数学引擎 v2
 // ============================================================
-// 实现 tech-spec 第 4 节「7:3 双引擎转化模型」全部公式。
-// 所有计算均为纯前端，无后端依赖。
+// 技术依据：tech-spec 第 4 节「7:3 双引擎转化模型」
+//
+// 核心模型变更（v5→v6）：
+// - 衍生技能不再直接等于加权平均，改用目标跟踪收敛模型
+// - S_j 向 target = B̄_j 缓慢收敛，模拟"现实整合滞后于基础能力"
+// - γ(K) + λ(S_j) + QFilter 共同决定收敛速率
+// ============================================================
 
 import {
   type DerivedSkill,
   type AppState,
   type BufferPool,
   type DerivedSkillDef,
-  tierMultiplier,
 } from './types';
 
 // ---------------------------------------------------------------------------
-// 0. 衍生技能权重配置（DAG 拓扑定义）
-//    来源：tech-spec §10.2 — 六项衍生技能加权公式
+// 0. 衍生技能权重配置（来源：tech-spec §10.2）
 // ---------------------------------------------------------------------------
 
 export const SKILL_DEFS: DerivedSkillDef[] = [
-  // ---- Layer 1 (tier 1) ----
   {
-    id: 'mastery',
-    label: '熟练度',
+    id: 'mastery', label: '熟练度', tier: 1,
     description: '测试阶段性的状态，与当下的环境事务有关',
-    tier: 1,
     inputs: [
       { source: 'intellect', weight: 4 },
       { source: 'social', weight: 3 },
@@ -32,10 +32,8 @@ export const SKILL_DEFS: DerivedSkillDef[] = [
     ],
   },
   {
-    id: 'flow',
-    label: '流动感',
+    id: 'flow', label: '流动感', tier: 1,
     description: '测定有无内耗，做事情的产出效率，外显的自然感',
-    tier: 1,
     inputs: [
       { source: 'charm', weight: 4 },
       { source: 'intellect', weight: 3 },
@@ -44,10 +42,8 @@ export const SKILL_DEFS: DerivedSkillDef[] = [
     ],
   },
   {
-    id: 'behavioralCues',
-    label: '强行为线索',
+    id: 'behavioralCues', label: '强行为线索', tier: 1,
     description: '稀缺的潜沟通信号，建立于流动感之上并带有持续性',
-    tier: 1,
     inputs: [
       { source: 'charm', weight: 3 },
       { source: 'courage', weight: 3 },
@@ -57,34 +53,26 @@ export const SKILL_DEFS: DerivedSkillDef[] = [
     ],
   },
   {
-    id: 'opportunity',
-    label: '机会捕捉能力',
+    id: 'opportunity', label: '机会捕捉能力', tier: 1,
     description: '在非常恰当的时机捕猎机会，主动价值交换',
-    tier: 1,
     inputs: [
       { source: 'intellect', weight: 5 },
       { source: 'charm', weight: 3 },
       { source: 'social', weight: 2 },
     ],
   },
-  // ---- Layer 2 (tier 2) ----
   {
-    id: 'professional',
-    label: '工作业务能力',
+    id: 'professional', label: '工作业务能力', tier: 2,
     description: '测定工作实际的能力，与个人兴趣驱动的坚定有关',
-    tier: 2,
     inputs: [
       { source: 'mastery', weight: 4 },
       { source: 'flow', weight: 4 },
       { source: 'intellect', weight: 2 },
     ],
   },
-  // ---- Layer 3 (tier 3) ----
   {
-    id: 'macroControl',
-    label: '掌控感',
+    id: 'macroControl', label: '掌控感', tier: 3,
     description: '统筹全局，受激素水平/心态客观影响，作为全局阻尼',
-    tier: 3,
     inputs: [
       { source: 'abstinence', weight: 6 },
       { source: 'opportunity', weight: 1 },
@@ -96,8 +84,20 @@ export const SKILL_DEFS: DerivedSkillDef[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// 辅助：根据当前值推算下一里程碑边界阈值
-// 里程碑边界：21, 41, 61, 81, 101（101 代表上限哨兵）
+// 1. 收敛速率
+//    来源：tech-spec §4.2（7:3 模型的实现）
+//
+//    基础速率 0.10：每次打卡，衍生技能向目标收敛 10%（约 50 次打卡满程）
+//    Q_filter ≥ 75 → 翻倍至 0.20（心智整合成功，加速）
+//    Q_filter < 75 → 减半至 0.05（心智未整合，放缓）
+// ---------------------------------------------------------------------------
+
+const BASE_CONVERGENCE = 0.10;
+const QFILTER_HIGH_CONVERGENCE = 0.20;
+const QFILTER_LOW_CONVERGENCE = 0.05;
+
+// ---------------------------------------------------------------------------
+// 辅助
 // ---------------------------------------------------------------------------
 
 const MILESTONE_BOUNDARIES = [21, 41, 61, 81, 101] as const;
@@ -110,184 +110,120 @@ function getNextMilestoneThreshold(currentVal: number): number {
 }
 
 // ---------------------------------------------------------------------------
-// 辅助：从 AppState 中解析输入源的值
-// 先在 baseAttrs 中查找，未命中则在 derivedSkills 中查找
-// ---------------------------------------------------------------------------
-
-function resolveSourceValue(source: string, state: AppState): number {
-  // 基础属性 — BaseAttrs 是已知键接口，通过 unknown 桥接为索引类型以支持动态键查找
-  const baseAttrs = state.baseAttrs as unknown as Record<string, number>;
-  if (source in baseAttrs) {
-    return baseAttrs[source];
-  }
-  // 衍生技能 — 同理
-  const derivedSkills = state.derivedSkills as unknown as Record<string, number>;
-  if (source in derivedSkills) {
-    return derivedSkills[source];
-  }
-  return 0;
-}
-
-// ---------------------------------------------------------------------------
-// 1. 加权基础分 B̄_j
-//    B̄_j = Σ(B_i * W_ji) / Σ(W_ji)
+// 2. 加权基础分 B̄_j = Σ(B_i · W_ji) / Σ(W_ji)
 //    来源：tech-spec §4.3
 // ---------------------------------------------------------------------------
 
-/**
- * 计算衍生技能的加权基础分。
- *
- * @param inputs - 输入源及其权重列表
- * @param state  - 当前应用状态（从中读取 baseAttrs 与 derivedSkills）
- * @returns 加权平均分 (0-100)
- */
+function resolveSourceValue(source: string, state: AppState, values: Record<string, number>): number {
+  if (source in values) return values[source];
+  const baseAttrs = state.baseAttrs as unknown as Record<string, number>;
+  if (source in baseAttrs) return baseAttrs[source];
+  const derived = state.derivedSkills as unknown as Record<string, number>;
+  if (source in derived) return derived[source];
+  return 0;
+}
+
 export function calcWeightedBase(
   inputs: { source: string; weight: number }[],
   state: AppState,
+  values: Record<string, number>,
 ): number {
-  let numerator = 0;
-  let denominator = 0;
-
+  let num = 0, den = 0;
   for (const { source, weight } of inputs) {
-    const val = resolveSourceValue(source, state);
-    numerator += val * weight;
-    denominator += weight;
+    num += resolveSourceValue(source, state, values) * weight;
+    den += weight;
   }
-
-  return denominator > 0 ? numerator / denominator : 0;
+  return den > 0 ? num / den : 0;
 }
 
 // ---------------------------------------------------------------------------
-// 2. 掌控感阻尼系数 γ(K) — Sigmoid
-//    γ(K) = 0.5 + 1 / (1 + e^(-(K - 50) / 10))
+// 3. 掌控感阻尼系数 γ(K) — Sigmoid
+//    γ(K) = 0.5 + 1 / (1 + e^(-(K-50)/10))
 //    来源：tech-spec §4.4
-//
-//    特性：
-//      K = 0   → γ ≈ 0.5   (触底)
-//      K = 50  → γ = 1.0   (中性)
-//      K = 80  → γ ≈ 1.45  (高掌控)
-//      K = 100 → γ ≈ 1.5   (上限)
 // ---------------------------------------------------------------------------
 
-/**
- * 计算掌控感阻尼系数。
- *
- * @param macroControlVal - 掌控感当前值 K (0-100)，应为上一结算周期的值
- * @returns 阻尼系数 γ ∈ [0.5, ~1.5]
- */
 export function calcGamma(macroControlVal: number): number {
   return 0.5 + 1 / (1 + Math.exp(-(macroControlVal - 50) / 10));
 }
 
 // ---------------------------------------------------------------------------
-// 3. 饱和度限速系数 λ(S_j)
-//    λ(S_j) = 1 - (S_j / 100)²
+// 4. 饱和度限速系数 λ(S_j) = 1 - (S_j/100)²
 //    来源：tech-spec §4.5
-//
-//    特性：
-//      S_j = 0   → λ = 1.0
-//      S_j = 50  → λ = 0.75
-//      S_j = 80  → λ = 0.36
-//      S_j = 95  → λ ≈ 0.10
 // ---------------------------------------------------------------------------
 
-/**
- * 计算饱和度限速系数。
- *
- * @param currentVal - 衍生技能当前值 S_j (0-100)
- * @returns 限速系数 λ ∈ [0, 1]
- */
 export function calcLambda(currentVal: number): number {
   return 1 - Math.pow(currentVal / 100, 2);
 }
 
 // ---------------------------------------------------------------------------
-// 4. 7:3 双引擎公式 — 衍生技能增量 ΔS_j
-//    ΔS_j = [0.7·B̄_j + 0.3·Q_filter] · γ(K) · λ(S_j)
-//    来源：tech-spec §4.2
+// 5. 目标跟踪收敛模型
+//    ΔS_j = (target_j - S_j_current) × rate × γ(K) × λ(S_j_current)
 //
-//    Q_filter 缺省规则（tech-spec §5.2）：
-//      未触发/未回答时，Q_filter = B̄_j × 0.5
+//    关键：
+//    - target_j = B̄_j（加权基础分），不是 S_j 的旧值
+//    - 衍生技能 LAG 在基础能力后面，模拟现实整合时间
+//    - γ(K) 为全局阻尼，λ 为个人饱和度限速
 // ---------------------------------------------------------------------------
 
 /**
- * 计算衍生技能单次结算周期的增量 ΔS_j。
+ * 结算全部衍生技能（目标跟踪收敛模型）。
  *
- * @param weightedBase - 加权基础分 B̄_j
- * @param qFilterScore - Q_filter 过渡筛选得分 (0-100)，为 null 时按 B̄_j × 0.5 缺省
- * @param gamma        - 掌控感阻尼系数 γ(K)
- * @param lambda       - 饱和度限速系数 λ(S_j)
- * @returns 衍生技能得分增量 ΔS_j
+ * @param state       - 当前应用状态
+ * @param qFilterSkips - 本轮已跳过的 QFilter 技能（收敛率 0.10）
+ * @param qFilterBonuses - 技能 → QFilter 得分（≥75→0.20，<75→0.05）
+ * @returns 更新后的技能值与缓冲池
  */
-export function calcDerivedDelta(
-  weightedBase: number,
-  qFilterScore: number | null,
-  gamma: number,
-  lambda: number,
-): number {
-  const qFilter = qFilterScore ?? weightedBase * 0.5;
-  return (0.7 * weightedBase + 0.3 * qFilter) * gamma * lambda;
-}
-
-// ---------------------------------------------------------------------------
-// 5. 全量衍生技能结算
-//    按 DAG 拓扑序依次计算，保证跨层依赖时上游技能值已固化。
-//    返回更新后的技能值与缓冲池状态。
-//    来源：tech-spec §4.3（计算次序）+ §5.1（缓冲池）
-// ---------------------------------------------------------------------------
-
-/**
- * 结算全部衍生技能。
- *
- * 计算流程：
- *   1. 按 tier 升序排列 SKILL_DEFS
- *   2. 维护工作值映射（baseAttrs + 已结算技能），确保 DAG 依赖正确
- *   3. 获取 γ(K)：有 macroControl 历史则计算，首周期默认 γ = 1.0
- *   4. 逐技能计算 B̄_j → λ(S_j) → ΔS_j
- *   5. 增量累加入对应缓冲池，技能值即时更新
- *
- * @param state - 当前应用状态
- * @returns 更新后的技能值与缓冲池数组
- */
-export function calcAllDerivedSkills(state: AppState): {
-  skills: Record<DerivedSkill, number>;
-  pools: BufferPool[];
-} {
-  // ---- 按 tier 排序 ----
+export function calcAllDerivedSkills(
+  state: AppState,
+  qFilterBonuses?: Partial<Record<DerivedSkill, number>>,
+): { skills: Record<DerivedSkill, number>; pools: BufferPool[] } {
   const sorted = [...SKILL_DEFS].sort((a, b) => a.tier - b.tier);
 
-  // ---- 工作值映射：起点为基础属性，逐层加入已算得的衍生技能 ----
+  // 工作值映射（基础属性 + 逐层计算的衍生技能）
   const values: Record<string, number> = {
     ...(state.baseAttrs as unknown as Record<string, number>),
+    ...(state.derivedSkills as unknown as Record<string, number>),
   };
 
-  // ---- 输出容器 ----
+  // γ(K)：取上一周期的掌控感。首周期无历史 → 按基础属性初算
+  const kRaw = state.derivedSkills.macroControl ?? 25;
+  const gamma = calcGamma(kRaw);
+
   const skills: Record<string, number> = {};
   const pools: BufferPool[] = [];
 
   for (const def of sorted) {
-    const skillId = def.id as DerivedSkill;
+    const sid = def.id as DerivedSkill;
 
-    // --- 加权基础分 B̄_j（依赖源可能是 baseAttr 或已算得的 tier-1 衍生技能）---
-    let numerator = 0;
-    let denominator = 0;
-    for (const { source, weight } of def.inputs) {
-      numerator += (values[source] ?? state.derivedSkills[source as DerivedSkill] ?? 0) * weight;
-      denominator += weight;
+    // target_j：加权基础分（用当前工作值映射）
+    const target = calcWeightedBase(def.inputs, state, values);
+
+    // current_j
+    const current = values[sid] ?? 0;
+
+    // 收敛率：基础 0.10 ± QFilter 修正
+    const qf = qFilterBonuses?.[sid];
+    let rate = BASE_CONVERGENCE;
+    if (qf !== undefined) {
+      rate = qf >= 75 ? QFILTER_HIGH_CONVERGENCE : QFILTER_LOW_CONVERGENCE;
     }
-    const weightedBase = denominator > 0 ? numerator / denominator : 0;
 
-    // --- MVP：衍生技能 = 直接加权平均（无增量累加、无 gamma 反馈）---
-    const newVal = Math.min(100, Math.max(0, Math.round(weightedBase)));
-    skills[skillId] = newVal;
-    values[skillId] = newVal; // 供下游技能引用
+    // λ(S_j_current)：当前技能越高，推进越慢
+    const lambda = calcLambda(current);
 
-    // --- 缓冲池（仅记录，MVP 不触发 QFilter）---
-    const prevSkillVal = state.derivedSkills[skillId] ?? 0;
+    // ΔS_j
+    const gap = target - current;
+    const delta = gap * rate * gamma * lambda;
+
+    const newVal = Math.max(0, Math.min(100, Math.round((current + delta) * 10) / 10));
+    skills[sid] = newVal;
+    values[sid] = newVal; // 下游技能可引用
+
+    // 缓冲池：累计移动量（用于里程碑晋级检测）
     pools.push({
-      skill: skillId,
-      accumulated: newVal - prevSkillVal,
-      threshold: getNextMilestoneThreshold(prevSkillVal),
+      skill: sid,
+      accumulated: Math.abs(delta),
+      threshold: getNextMilestoneThreshold(current),
       lockedUntil: null,
     });
   }
@@ -299,37 +235,19 @@ export function calcAllDerivedSkills(state: AppState): {
 }
 
 // ---------------------------------------------------------------------------
-// 6. 基础属性增量（带分段阈值倍率）
-//    ΔB_effective = ΔB_raw × T(B_current)
-//    来源：tech-spec §2.3
+// 6. 基础属性增量
 // ---------------------------------------------------------------------------
 
-/**
- * 计算基础属性的有效增量（应用分段阈值倍率）。
- *
- * @param rawDelta   - 原始增量 ΔB_raw
- * @param currentVal - 属性当前值
- * @returns 有效增量（已乘阈值倍率）
- */
-export function calcBaseAttrDelta(rawDelta: number, currentVal: number): number {
-  return rawDelta * tierMultiplier(currentVal);
+export function calcBaseAttrDelta(_raw: number, _current: number): number {
+  // 基础属性用 store 里的 tierMultiplier 直接乘，不再二次封装
+  return 0; // deprecated — 实际计算在 store 中
 }
 
 // ---------------------------------------------------------------------------
 // 7. 缓冲池触发检查
-//    来源：tech-spec §5.2 — 累积值 ≥ 阈值 × 0.8 时具备触发资格
+//    触发条件：accumulated >= threshold × 0.8
 // ---------------------------------------------------------------------------
 
-/**
- * 检查缓冲池是否达到触发阈值。
- *
- * 触发条件：accumulated >= threshold × 0.8
- *
- * @param _skill      - 衍生技能标识（保留用于未来扩展）
- * @param accumulated - 当前累积值
- * @param threshold   - 晋级阈值（下一里程碑边界）
- * @returns { triggered: true } 当累积值 ≥ 阈值的 80%
- */
 export function bufferPoolCheck(
   _skill: DerivedSkill,
   accumulated: number,
