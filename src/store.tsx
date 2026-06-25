@@ -234,9 +234,16 @@ function reducer(s: AppState, a: Action): AppState {
 // Context
 // ============================================================
 
+interface CheckinResult {
+  bonus: Partial<BaseAttrs>
+  previousDerived: DerivedSkills
+  newDerived: DerivedSkills
+  qfilterTriggered: boolean
+}
+
 interface StoreContext {
   state: AppState
-  addCheckin: (systemId: string, answers: Record<string, string>) => void
+  addCheckin: (systemId: string, answers: Record<string, string>) => CheckinResult | null
   answerQFilter: (
     skillId: DerivedSkill,
     questionId: string,
@@ -275,18 +282,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, [state.bufferPools])
 
   // ==========================================================
-  // addCheckin
+  // addCheckin — 返回反馈对象供 UI 展示
   // ==========================================================
   const addCheckin = useCallback(
     (systemId: string, answers: Record<string, string>) => {
-      // 1. 查找对应的打卡定义
       const def = CHECKINS.find((d: CheckinDef) => d.system === systemId)
-      if (!def) return
+      if (!def) return null
 
-      // 2. 计算基础属性增量
+      // 1. 计算基础属性增量
       const rawDelta = def.calcBonus(answers)
-
-      // 3. 过滤：仅保留有效 BaseAttr 键且值非零
       const baseAttrDelta: Partial<BaseAttrs> = {}
       for (const [k, v] of Object.entries(rawDelta)) {
         if (BASE_ATTR_KEYS.has(k) && typeof v === 'number' && v !== 0) {
@@ -294,7 +298,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      // 4. 创建打卡记录
+      // 2. 预计算新状态（同步，用于即时 UI 反馈）
+      const prevDerived = { ...state.derivedSkills }
+      const newBaseAttrs = { ...state.baseAttrs }
+      for (const [k, v] of Object.entries(baseAttrDelta)) {
+        const key = k as keyof BaseAttrs
+        const multi = tierMultiplier(newBaseAttrs[key])
+        newBaseAttrs[key] = Math.max(0, Math.min(100, Math.round((newBaseAttrs[key] + v * multi) * 10) / 10))
+      }
+      const intermediate: AppState = { ...state, baseAttrs: newBaseAttrs }
+      const { skills: newDerived } = calcAllDerivedSkills(intermediate)
+
+      // 3. 派发 CHECKIN
       const record: CheckinRecord = {
         id: uid(),
         date: todayISO(),
@@ -302,11 +317,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         answers,
         baseAttrDelta,
       }
-
-      // 5. 派发 CHECKIN（内部完成属性更新 + 衍生技能结算）
       dispatch({ type: 'CHECKIN', record, baseAttrDelta })
+
+      // 4. 返回值给 UI
+      return {
+        bonus: baseAttrDelta,
+        previousDerived: prevDerived,
+        newDerived,
+        qfilterTriggered: false,
+      }
     },
-    [],
+    [state],
   )
 
   // ==========================================================

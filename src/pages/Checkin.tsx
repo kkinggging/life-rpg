@@ -2,8 +2,8 @@
 // 量化人生RPG — 打卡页
 // ============================================================
 import { useState } from 'react'
-import type { DerivedSkill, BaseAttr } from '../types'
-import { ATTR_META } from '../types'
+import type { BaseAttr, DerivedSkill } from '../types'
+import { ATTR_META, SKILL_META } from '../types'
 import { useStore } from '../store'
 import CheckinFlow from '../components/CheckinFlow'
 import QFilterPanel from '../components/QFilterPanel'
@@ -14,30 +14,23 @@ interface Props {
   onCancel: () => void
 }
 
-/** addCheckin 返回值 */
-interface CheckinOutcome {
-  bonus: Partial<Record<string, number>>
-  qfilterTriggered: boolean
-  targetSkill?: DerivedSkill
-}
-
 export default function Checkin({ onDone, onCancel }: Props) {
-  const { addCheckin, answerQFilter } = useStore()
+  const { addCheckin, answerQFilter, state } = useStore()
   const [sys, setSys] = useState<string | null>(null)
-  const [outcome, setOutcome] = useState<CheckinOutcome | null>(null)
+  const [result, setResult] = useState<ReturnType<typeof addCheckin>>(null)
   const [qfilterDone, setQfilterDone] = useState(false)
 
   const handlePick = (s: string) => setSys(s)
 
   const handleDone = (answers: Record<string, string>) => {
     if (!sys) return
-    const result = addCheckin(sys, answers) as unknown as CheckinOutcome
-    setOutcome({ ...result, qfilterTriggered: result.qfilterTriggered ?? false })
+    const r = addCheckin(sys, answers)
+    setResult(r)
   }
 
   const handleMore = () => {
     setSys(null)
-    setOutcome(null)
+    setResult(null)
     setQfilterDone(false)
   }
 
@@ -64,9 +57,7 @@ export default function Checkin({ onDone, onCancel }: Props) {
               <span className="text-3xl">{c.emoji}</span>
               <div>
                 <div className="font-semibold text-base text-slate-100">{c.label}</div>
-                <div className="text-[12px] text-slate-500 mt-0.5">
-                  {c.questions.length}个问题
-                </div>
+                <div className="text-[12px] text-slate-500 mt-0.5">选择以开始打卡</div>
               </div>
             </button>
           ))}
@@ -78,7 +69,7 @@ export default function Checkin({ onDone, onCancel }: Props) {
   const def = CHECKINS.find(d => d.system === sys)!
 
   // ── Stage 2: 答题 ──
-  if (!outcome) {
+  if (!result) {
     return (
       <div className="px-4 pt-6 pt-safe max-w-lg mx-auto">
         <button
@@ -93,22 +84,36 @@ export default function Checkin({ onDone, onCancel }: Props) {
   }
 
   // ── Stage 3: 完成 ──
-  const changes = Object.entries(outcome.bonus).filter(([, v]) => v !== 0)
-  const showQFilter = outcome.qfilterTriggered && !!outcome.targetSkill && !qfilterDone
+  const changes = Object.entries(result.bonus).filter(([, v]) => v !== 0)
+  const showQFilter = result.qfilterTriggered && !qfilterDone
+
+  // 合并基础属性变化 + 衍生技能变化
+  const derivedChanges = (Object.keys(state.derivedSkills) as DerivedSkill[])
+    .filter(sk => {
+      const prev = result.previousDerived[sk] ?? 0
+      const now = state.derivedSkills[sk] ?? 0
+      return Math.abs(now - prev) > 0.5
+    })
+    .map(sk => ({
+      key: sk,
+      prev: result.previousDerived[sk] ?? 0,
+      now: state.derivedSkills[sk] ?? 0,
+      delta: (state.derivedSkills[sk] ?? 0) - (result.previousDerived[sk] ?? 0),
+    }))
 
   return (
     <div className="px-4 pt-6 pt-safe max-w-lg mx-auto flex flex-col items-center text-center">
-      {/* 完成动画 */}
+      {/* 完成标识 */}
       <div className="text-6xl mb-3 animate-pop-in">✨</div>
       <h2 className="text-xl font-bold text-slate-100 mb-1">打卡完成！</h2>
-      <p className="text-sm text-slate-500 mb-6">{def.label}已记录</p>
+      <p className="text-sm text-slate-500 mb-5">{def.label}已记录</p>
 
       {/* 属性变化 */}
-      {changes.length > 0 && (
-        <div className="bg-slate-800/80 rounded-2xl p-4 mb-6 w-full max-w-xs border border-slate-700/30">
-          <h3 className="text-xs font-medium text-slate-500 mb-3 uppercase tracking-wide">
-            属性变化
-          </h3>
+      <div className="bg-slate-800/80 rounded-2xl p-4 mb-4 w-full border border-slate-700/30">
+        <h3 className="text-xs font-medium text-slate-500 mb-3 uppercase tracking-wide">
+          基础属性变化
+        </h3>
+        {changes.length > 0 ? (
           <div className="space-y-2.5">
             {changes.map(([k, v]) => {
               const key = k as BaseAttr
@@ -129,33 +134,58 @@ export default function Checkin({ onDone, onCancel }: Props) {
               )
             })}
           </div>
-        </div>
-      )}
+        ) : (
+          <p className="text-sm text-slate-500">今日休息也是一种策略。</p>
+        )}
+      </div>
 
-      {changes.length === 0 && (
-        <p className="text-sm text-slate-500 mb-6">今日休息也是一种策略。</p>
+      {/* 衍生技能变化 */}
+      {derivedChanges.length > 0 && (
+        <div className="bg-slate-800/80 rounded-2xl p-4 mb-4 w-full border border-slate-700/30">
+          <h3 className="text-xs font-medium text-slate-500 mb-3 uppercase tracking-wide">
+            衍生技能变化
+          </h3>
+          <div className="space-y-2.5">
+            {derivedChanges.map(({ key, prev, now }) => {
+              const meta = SKILL_META[key]
+              const delta = now - prev
+              return (
+                <div key={key} className="flex justify-between items-center">
+                  <span className="text-sm text-slate-300">
+                    {meta.emoji} {meta.label}
+                  </span>
+                  <span className={`text-sm font-bold tabular-nums ${
+                    delta >= 0 ? 'text-blue-400' : 'text-red-400'
+                  }`}>
+                    {Math.round(prev)} → {Math.round(now)}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
       )}
 
       {/* QFilter 面板 */}
       {showQFilter && (
         <QFilterPanel
-          skill={outcome.targetSkill!}
+          skill={'mastery' as DerivedSkill}
           onAnswer={(questionId, answer, responseTime) => {
-            answerQFilter(outcome.targetSkill!, questionId, answer, responseTime)
+            answerQFilter('mastery' as DerivedSkill, questionId, answer, responseTime)
             setQfilterDone(true)
           }}
           onSkip={() => setQfilterDone(true)}
         />
       )}
 
-      {/* 操作按钮 — QFilter 完成/不触发时显示 */}
+      {/* 操作按钮 */}
       {!showQFilter && (
         <>
           <button
             onClick={onDone}
             className="w-full max-w-xs tap px-4 py-4 bg-amber-500 rounded-2xl
                        font-bold text-lg text-slate-900
-                       active:scale-[0.97] transition-transform no-select"
+                       active:scale-[0.97] transition-transform no-select mt-2"
           >
             返回仪表板
           </button>

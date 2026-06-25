@@ -224,12 +224,12 @@ export const ATTR_META: Record<BaseAttr, IndicatorMeta> = {
 };
 
 export const SKILL_META: Record<DerivedSkill, IndicatorMeta> = {
-  mastery:        { label: '掌控力',   emoji: '🎯', color: '#dc2626', description: '对专业技能的深度掌控与行业影响力' },
-  flow:           { label: '心流',     emoji: '🌊', color: '#0891b2', description: '注意力集中度与行动思维的一致性' },
-  behavioralCues: { label: '行为暗示', emoji: '🎭', color: '#a21caf', description: '行为举止的气场、表达力与潜沟通能力' },
-  professional:   { label: '职业力',   emoji: '🏆', color: '#ca8a04', description: '职场贡献度、项目推动力与业务影响力' },
-  opportunity:    { label: '机遇感知', emoji: '🔮', color: '#65a30d', description: '对机遇的感知、捕捉与生态构建能力' },
-  macroControl:   { label: '宏观掌控', emoji: '♟️', color: '#1e40af', description: '全局规划、统筹协调与人生节奏的掌控力' },
+  mastery:        { label: '熟练度',       emoji: '⚙️', color: '#f59e0b', description: '测试阶段性的状态，与当下的环境事务有关' },
+  flow:           { label: '流动感',       emoji: '🌊', color: '#06b6d4', description: '测定有无内耗，做事情的产出效率，外显的自然感' },
+  behavioralCues: { label: '强行为线索',   emoji: '🦅', color: '#d946ef', description: '稀缺的潜沟通信号，建立于流动感之上并带有持续性' },
+  professional:   { label: '工作业务能力', emoji: '📊', color: '#eab308', description: '测定工作实际的能力，与个人兴趣驱动的坚定有关' },
+  opportunity:    { label: '机会捕捉能力', emoji: '🎯', color: '#22c55e', description: '在非常恰当的时机捕猎机会，主动价值交换' },
+  macroControl:   { label: '掌控感',       emoji: '🏛️', color: '#6366f1', description: '统筹全局，受激素水平/心态客观影响，作为全局阻尼' },
 };
 
 // 统一元数据映射: indicator → meta

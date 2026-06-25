@@ -256,25 +256,10 @@ export function calcAllDerivedSkills(state: AppState): {
   // ---- 按 tier 排序 ----
   const sorted = [...SKILL_DEFS].sort((a, b) => a.tier - b.tier);
 
-  // ---- 工作值映射：基础属性 + 已有衍生技能（后续逐技能覆盖）----
+  // ---- 工作值映射：起点为基础属性，逐层加入已算得的衍生技能 ----
   const values: Record<string, number> = {
     ...(state.baseAttrs as unknown as Record<string, number>),
-    ...(state.derivedSkills as unknown as Record<string, number>),
   };
-
-  // ---- 掌控感阻尼 γ(K) ----
-  // 首周期（无 macroControl 历史）默认 γ = 1.0
-  const macroControlVal = state.derivedSkills.macroControl;
-  const gamma =
-    macroControlVal !== undefined && macroControlVal !== null
-      ? calcGamma(macroControlVal)
-      : 1.0;
-
-  // ---- 复用现有缓冲池，缺失的按需创建 ----
-  const poolMap = new Map<DerivedSkill, BufferPool>();
-  for (const p of state.bufferPools) {
-    poolMap.set(p.skill, { ...p });
-  }
 
   // ---- 输出容器 ----
   const skills: Record<string, number> = {};
@@ -283,43 +268,28 @@ export function calcAllDerivedSkills(state: AppState): {
   for (const def of sorted) {
     const skillId = def.id as DerivedSkill;
 
-    // --- 加权基础分 B̄_j（使用工作值映射，保证 DAG 依赖正确）---
+    // --- 加权基础分 B̄_j（依赖源可能是 baseAttr 或已算得的 tier-1 衍生技能）---
     let numerator = 0;
     let denominator = 0;
     for (const { source, weight } of def.inputs) {
-      numerator += (values[source] ?? 0) * weight;
+      numerator += (values[source] ?? state.derivedSkills[source as DerivedSkill] ?? 0) * weight;
       denominator += weight;
     }
     const weightedBase = denominator > 0 ? numerator / denominator : 0;
 
-    // --- 饱和度限速 λ(S_j) ---
-    const currentVal = values[skillId] ?? 0;
-    const lambda = calcLambda(currentVal);
-
-    // --- 增量 ΔS_j（Q_filter 缺省为 null → 使用 B̄_j × 0.5）---
-    const delta = calcDerivedDelta(weightedBase, null, gamma, lambda);
-
-    // --- 更新技能值 ---
-    const newVal = Math.min(100, Math.max(0, currentVal + delta));
+    // --- MVP：衍生技能 = 直接加权平均（无增量累加、无 gamma 反馈）---
+    const newVal = Math.min(100, Math.max(0, Math.round(weightedBase)));
     skills[skillId] = newVal;
     values[skillId] = newVal; // 供下游技能引用
 
-    // --- 缓冲池 ---
-    let pool = poolMap.get(skillId);
-    if (!pool) {
-      pool = {
-        skill: skillId,
-        accumulated: 0,
-        threshold: getNextMilestoneThreshold(currentVal),
-        lockedUntil: null,
-      };
-    }
-    pool.accumulated += delta;
-    // 若已跨过当前阈值边界，更新为下一级阈值
-    if (newVal >= pool.threshold) {
-      pool.threshold = getNextMilestoneThreshold(newVal);
-    }
-    pools.push(pool);
+    // --- 缓冲池（仅记录，MVP 不触发 QFilter）---
+    const prevSkillVal = state.derivedSkills[skillId] ?? 0;
+    pools.push({
+      skill: skillId,
+      accumulated: newVal - prevSkillVal,
+      threshold: getNextMilestoneThreshold(prevSkillVal),
+      lockedUntil: null,
+    });
   }
 
   return {
