@@ -38,7 +38,7 @@ const BASE_ATTR_KEYS: ReadonlySet<string> = new Set([
 ])
 
 // ============================================================
-// Initial State
+// Initial State — 衍生技能从基础属性计算，不写死
 // ============================================================
 
 const INITIAL_BASE_ATTRS: BaseAttrs = {
@@ -52,14 +52,24 @@ const INITIAL_BASE_ATTRS: BaseAttrs = {
   abstinence: 20,
 }
 
-const INITIAL_DERIVED_SKILLS: DerivedSkills = {
-  mastery: 25,
-  flow: 25,
-  behavioralCues: 25,
-  professional: 25,
-  opportunity: 25,
-  macroControl: 25,
+/** 根据基础属性计算衍生技能的初始值 */
+function computeInitialDerived(base: BaseAttrs): DerivedSkills {
+  const mock: AppState = {
+    baseAttrs: base,
+    derivedSkills: {} as DerivedSkills,
+    checkinRecords: [],
+    qfilterRecords: [],
+    bufferPools: [],
+    blackBoxes: [],
+    lastBackup: null,
+    daysSinceFirstUse: 0,
+    blindTestResults: [],
+  }
+  const { skills } = calcAllDerivedSkills(mock)
+  return skills
 }
+
+const INITIAL_DERIVED_SKILLS = computeInitialDerived(INITIAL_BASE_ATTRS)
 
 const INITIAL_STATE: AppState = {
   baseAttrs: { ...INITIAL_BASE_ATTRS },
@@ -74,7 +84,7 @@ const INITIAL_STATE: AppState = {
 }
 
 // ============================================================
-// localStorage 持久化
+// localStorage 持久化 — 加载后重算衍生技能以保证一致性
 // ============================================================
 
 function loadState(): AppState {
@@ -82,16 +92,17 @@ function loadState(): AppState {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
       const parsed = JSON.parse(raw) as AppState
-      if (parsed.baseAttrs && parsed.derivedSkills) return parsed
+      if (parsed.baseAttrs) {
+        // 始终从基础属性重算衍生技能，杜绝写死值残留
+        const mock: AppState = { ...parsed, checkinRecords: parsed.checkinRecords ?? [], qfilterRecords: parsed.qfilterRecords ?? [], bufferPools: [], blackBoxes: [], blindTestResults: [] }
+        const { skills } = calcAllDerivedSkills(mock)
+        return { ...parsed, derivedSkills: skills }
+      }
     }
   } catch {
     /* corrupt storage — fall through to default */
   }
-  return {
-    ...INITIAL_STATE,
-    baseAttrs: { ...INITIAL_BASE_ATTRS },
-    derivedSkills: { ...INITIAL_DERIVED_SKILLS },
-  }
+  return { ...INITIAL_STATE, baseAttrs: { ...INITIAL_BASE_ATTRS }, derivedSkills: { ...INITIAL_DERIVED_SKILLS } }
 }
 
 function saveState(s: AppState): void {
@@ -200,10 +211,12 @@ function reducer(s: AppState, a: Action): AppState {
     }
 
     // ----------------------------------------------------------
-    // IMPORT — 全量导入状态
+    // IMPORT — 全量导入状态，重算衍生技能确保与基础属性一致
     // ----------------------------------------------------------
-    case 'IMPORT':
-      return a.state
+    case 'IMPORT': {
+      const { skills } = calcAllDerivedSkills(a.state)
+      return { ...a.state, derivedSkills: skills }
+    }
 
     // ----------------------------------------------------------
     // MARK_BACKUP — 更新上次备份时间
