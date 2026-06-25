@@ -9,10 +9,10 @@ import History from './pages/History'
 import Calibration from './components/Calibration'
 import BottomNav from './components/BottomNav'
 import type { BaseAttr, BaseAttrs } from './types'
-import { DEFAULT_BASE_ATTRS, DEFAULT_APP_STATE } from './types'
+import { DEFAULT_APP_STATE } from './types'
 
 // ⚠️ 每次发版递增此版本号 → iOS PWA 自动检测并强制刷新
-const APP_VERSION = '12'
+const APP_VERSION = '13'
 
 async function checkVersionAndUpdate() {
   const stored = localStorage.getItem('app-version')
@@ -48,17 +48,14 @@ function AppInner() {
     checkVersionAndUpdate().finally(() => setChecking(false))
   }, [])
 
-  // On mount: check if this is a first-time user
+  // On mount: check if calibration has been done (independent flag)
   useEffect(() => {
     if (checking) return
-    const allDefault = (Object.keys(DEFAULT_BASE_ATTRS) as BaseAttr[]).every(
-      (key) => state.baseAttrs[key] === DEFAULT_BASE_ATTRS[key],
-    )
-    const noRecords = !state.checkinRecords || state.checkinRecords.length === 0
-    if (allDefault && noRecords) {
+    const hasCalibrated = localStorage.getItem('life-rpg-calibrated')
+    if (!hasCalibrated) {
       setShowCalibration(true)
     }
-  }, [checking]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [checking])
 
   const handleCalibrationComplete = (values: Record<BaseAttr, number>) => {
     const newState = {
@@ -66,6 +63,7 @@ function AppInner() {
       baseAttrs: { ...values } as BaseAttrs,
     }
     importJSON(JSON.stringify(newState))
+    localStorage.setItem('life-rpg-calibrated', 'true')
     setShowCalibration(false)
   }
 

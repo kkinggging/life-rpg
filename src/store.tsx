@@ -1,5 +1,5 @@
 // ============================================================
-// Personal OS RPG — 全局状态管理 v6
+// Personal OS RPG — 全局状态管理 v13
 // ============================================================
 import React, { createContext, useContext, useReducer, useEffect, useCallback } from 'react'
 import type {
@@ -11,11 +11,11 @@ import type {
   CheckinRecord,
   QFilterRecord,
   BufferPool,
-  BlackBox,
 } from './types'
 import { tierMultiplier, DEFAULT_DERIVED_SKILLS } from './types'
-import { calcAllDerivedSkills, calcGamma } from './math'
-import { pickRandomQuestion, getConfidence, QUESTIONS } from './qfilter'
+import { calcAllDerivedSkills, calcGamma, bufferPoolCheck } from './math'
+import type { DerivedCalcInput } from './math'
+import { pickRandomQuestion, getConfidence } from './qfilter'
 import { CHECKINS, uid, todayISO } from './utils'
 import type { CheckinDef } from './utils'
 
@@ -24,6 +24,7 @@ import type { CheckinDef } from './utils'
 // ============================================================
 
 const STORAGE_KEY = 'life-rpg-state'
+const CALIBRATION_KEY = 'life-rpg-calibrated'
 
 const BASE_ATTR_KEYS: ReadonlySet<string> = new Set([
   'charm', 'strength', 'intellect', 'social',
@@ -42,12 +43,11 @@ const INITIAL_BASE_ATTRS: BaseAttrs = {
 function computeInitialDerived(base: BaseAttrs): DerivedSkills {
   const mock: AppState = {
     baseAttrs: base,
-    // FIX: Use DEFAULT_DERIVED_SKILLS instead of {} as DerivedSkills type lie
     derivedSkills: { ...DEFAULT_DERIVED_SKILLS },
     checkinRecords: [], qfilterRecords: [], bufferPools: [],
     blackBoxes: [], lastBackup: null, daysSinceFirstUse: 0, blindTestResults: [],
   }
-  const { skills } = calcAllDerivedSkills(mock)
+  const { skills } = calcAllDerivedSkills({ state: mock, lockedSkills: new Set() })
   return skills
 }
 
@@ -70,8 +70,8 @@ function loadState(): AppState {
     if (raw) {
       const parsed = JSON.parse(raw) as AppState
       if (parsed.baseAttrs) {
-        const mock: AppState = { ...parsed, bufferPools: [] }
-        const { skills } = calcAllDerivedSkills(mock)
+        const input: DerivedCalcInput = { state: parsed, lockedSkills: getLockedSkills(parsed) }
+        const { skills } = calcAllDerivedSkills(input)
         return { ...parsed, derivedSkills: skills }
       }
     }
@@ -83,6 +83,18 @@ function loadState(): AppState {
   }
 }
 
+/** 从 state 中提取当前已锁定的技能集合 */
+function getLockedSkills(s: AppState): Set<DerivedSkill> {
+  const today = todayISO()
+  const locked = new Set<DerivedSkill>()
+  for (const p of s.bufferPools ?? []) {
+    if (p.lockedUntil && p.lockedUntil > today) {
+      locked.add(p.skill)
+    }
+  }
+  return locked
+}
+
 function saveState(s: AppState): void {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)) } catch { /* quota */ }
 }
@@ -92,7 +104,9 @@ function saveState(s: AppState): void {
 // ============================================================
 
 type Action =
-  | { type: 'CHECKIN'; record: CheckinRecord; baseAttrDelta: Partial<BaseAttrs>; qFilterBonuses?: Partial<Record<DerivedSkill, number>> }
+  | { type: 'CHECKIN'; record: CheckinRecord; baseAttrDelta: Partial<BaseAttrs>; qFilterScores?: Partial<Record<DerivedSkill, number>> }
+  | { type: 'LOCK_POOL'; skill: DerivedSkill; lockedUntil: string; retention: number }
+  | { type: 'UNLOCK_EXPIRED' }
   | { type: 'QFILTER_SAVE'; record: QFilterRecord }
   | { type: 'IMPORT'; state: AppState }
   | { type: 'MARK_BACKUP' }
@@ -114,19 +128,37 @@ function reducer(s: AppState, a: Action): AppState {
         checkinRecords: [...s.checkinRecords, a.record],
       }
 
-      const { skills, pools } = calcAllDerivedSkills(intermediate, a.qFilterBonuses)
+      // 获取当前已锁定的技能
+      const locked = getLockedSkills(intermediate)
 
-      // 合并缓冲池
-      const mergedPools: BufferPool[] = pools.map(p => {
-        const old = s.bufferPools.find(o => o.skill === p.skill)
-        if (!old) return p
-        return {
-          ...p,
-          accumulated: (old.accumulated ?? 0) + (p.accumulated ?? 0),
-        }
-      })
+      // 用 7:3 公式结算衍生技能
+      const input: DerivedCalcInput = {
+        state: intermediate,
+        qFilterScores: a.qFilterScores,
+        lockedSkills: locked,
+      }
+      const { skills, pools } = calcAllDerivedSkills(input)
 
-      return { ...intermediate, derivedSkills: skills, bufferPools: mergedPools }
+      return { ...intermediate, derivedSkills: skills, bufferPools: pools }
+    }
+
+    case 'LOCK_POOL': {
+      const pools = (s.bufferPools ?? []).map(p =>
+        p.skill === a.skill
+          ? { ...p, accumulated: p.accumulated * a.retention, lockedUntil: a.lockedUntil }
+          : p
+      )
+      return { ...s, bufferPools: pools }
+    }
+
+    case 'UNLOCK_EXPIRED': {
+      const today = todayISO()
+      const pools = (s.bufferPools ?? []).map(p =>
+        p.lockedUntil && p.lockedUntil <= today
+          ? { ...p, lockedUntil: null }
+          : p
+      )
+      return { ...s, bufferPools: pools }
     }
 
     case 'QFILTER_SAVE': {
@@ -134,7 +166,8 @@ function reducer(s: AppState, a: Action): AppState {
     }
 
     case 'IMPORT': {
-      const { skills } = calcAllDerivedSkills(a.state)
+      const input: DerivedCalcInput = { state: a.state, lockedSkills: getLockedSkills(a.state) }
+      const { skills } = calcAllDerivedSkills(input)
       return { ...a.state, derivedSkills: skills }
     }
 
@@ -169,11 +202,7 @@ export interface CheckinResult {
 interface StoreContext {
   state: AppState
   addCheckin: (systemId: string, answers: Record<string, string>) => CheckinResult | null
-  answerQFilter: (
-    pending: QFilterPending,
-    answer: number,
-    responseTime: number,
-  ) => void
+  answerQFilter: (pending: QFilterPending, answer: number, responseTime: number) => void
   exportJSON: () => string
   importJSON: (json: string) => boolean
   markBackup: () => void
@@ -187,15 +216,17 @@ const Ctx = createContext<StoreContext | null>(null)
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(reducer, null, loadState)
-  // FIX: Holds pending checkin data when QFilter triggers; dispatched after QFilter answer or skip.
-  // This prevents the double-dispatch bug where addCheckin and answerQFilter both moved skills.
-  // Previously addCheckin dispatched CHECKIN at rate 0.10, then answerQFilter dispatched a second
-  // CHECKIN at the QFilter rate, causing net convergence to be higher than intended.
+
   const pendingCheckinRef = React.useRef<{
     record: CheckinRecord
     baseAttrDelta: Partial<BaseAttrs>
     triggeredSkill: DerivedSkill
   } | null>(null)
+
+  // 启动时解锁已过期的池
+  useEffect(() => {
+    dispatch({ type: 'UNLOCK_EXPIRED' })
+  }, [])
 
   useEffect(() => { saveState(state) }, [state])
 
@@ -209,12 +240,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const baseAttrDelta: Partial<BaseAttrs> = {}
       for (const [k, v] of Object.entries(rawDelta)) {
         if (BASE_ATTR_KEYS.has(k) && typeof v === 'number' && v !== 0) {
-          // Clamp raw deltas to ±1.0 — 健身增长应以月计量
           ;(baseAttrDelta as Record<string, number>)[k] = Math.max(-1.0, Math.min(1.0, v))
         }
       }
 
-      // 2. 预计算（同步，供 UI 即时反馈 — 无 QFilter）
+      // 2. 预计算（同步，供 UI 即时反馈）
       const prevDerived = { ...state.derivedSkills }
       const newBaseAttrs = { ...state.baseAttrs }
       for (const [k, v] of Object.entries(baseAttrDelta)) {
@@ -223,20 +253,22 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         newBaseAttrs[key] = Math.max(0, Math.min(100, Math.round((newBaseAttrs[key] + v * multi) * 10) / 10))
       }
       const intermediate: AppState = { ...state, baseAttrs: newBaseAttrs }
-      const { skills: previewDerived } = calcAllDerivedSkills(intermediate)
+      const locked = getLockedSkills(intermediate)
+      const { skills: previewDerived } = calcAllDerivedSkills({ state: intermediate, lockedSkills: locked })
 
-      // 3. QFilter 随机触发 — 20% 概率，与打卡体系联动选相关技能
+      // 3. 缓冲池累积 + QFilter 触发判断
       let qfilterPending: QFilterPending | null = null
-      if (Math.random() < 0.20) {
-        // 优选与当前打卡体系最相关的衍生技能
-        const skillMap: Record<string, DerivedSkill> = {
-          diet: 'mastery',
-          fitness: 'flow',
-          social: 'behavioralCues',
-          learning: 'opportunity',
-          abstinence: 'macroControl',
-        }
-        const targetSkill: DerivedSkill = skillMap[systemId] ?? 'mastery'
+      const skillMap: Record<string, DerivedSkill> = {
+        diet: 'mastery', fitness: 'flow', social: 'behavioralCues',
+        learning: 'opportunity', abstinence: 'macroControl',
+      }
+      const targetSkill: DerivedSkill = skillMap[systemId] ?? 'mastery'
+
+      // 检查该技能的缓冲池是否达到触发阈值
+      const pool = state.bufferPools.find(p => p.skill === targetSkill)
+      const isPoolReady = pool && bufferPoolCheck(pool.skill, pool.accumulated, pool.threshold).triggered
+
+      if (isPoolReady && Math.random() < 0.40) {
         const q = pickRandomQuestion(targetSkill)
         if (q) {
           qfilterPending = {
@@ -249,22 +281,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      // 4. Create checkin record
+      // 4. 创建打卡记录
       const record: CheckinRecord = {
         id: uid(), date: todayISO(),
         system: systemId as CheckinRecord['system'],
         answers, baseAttrDelta,
       }
 
-      // 5. Dispatch: delay if QFilter triggered (single dispatch with correct rate later)
+      // 5. 触发 QFilter → 延迟 dispatch（等待用户回答后一次性结算）
       if (qfilterPending) {
-        pendingCheckinRef.current = {
-          record,
-          baseAttrDelta,
-          triggeredSkill: qfilterPending.skill,
-        }
+        pendingCheckinRef.current = { record, baseAttrDelta, triggeredSkill: qfilterPending.skill }
       } else {
-        dispatch({ type: 'CHECKIN', record, baseAttrDelta, qFilterBonuses: undefined })
+        // 未触发：直接用 7:3 缺省 Q 值（Q_effective = B̄_j × 0.5）结算
+        dispatch({ type: 'CHECKIN', record, baseAttrDelta, qFilterScores: undefined })
       }
 
       return { bonus: baseAttrDelta, previousDerived: prevDerived, newDerived: previewDerived, qfilterPending }
@@ -274,17 +303,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const answerQFilter = useCallback(
     (pending: QFilterPending, answer: number, responseTime: number) => {
-      // FIX: Retrieve the stashed checkin data (saved in addCheckin when QFilter triggered).
-      // Previously addCheckin dispatched CHECKIN immediately at rate 0.10, then answerQFilter
-      // dispatched a second CHECKIN at the QFilter rate — causing a double-move.
-      // Now addCheckin DELAYS dispatch when QFilter triggers, and answerQFilter does the single
-      // correct dispatch with the proper QFilter bonus applied.
       const stashed = pendingCheckinRef.current
       pendingCheckinRef.current = null
-
-      // FIX: answer < 0 is the skip sentinel — apply low rate without saving QFilterRecord
       const isSkip = answer < 0
 
+      // 保存 QFilterRecord
       if (!isSkip) {
         const confidence = getConfidence(responseTime)
         const qfRecord: QFilterRecord = {
@@ -292,18 +315,32 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           targetSkill: pending.skill,
           dimension: pending.dimension,
           questionVariant: pending.questionId,
-          answer: answer * (confidence < 1.0 ? 0.7 : 1.0), // 低信度衰减
+          answer: answer * (confidence < 1.0 ? 0.7 : 1.0),
           responseTime, confidence,
         }
         dispatch({ type: 'QFILTER_SAVE', record: qfRecord })
       }
 
-      // Dispatch the pending checkin with QFilter bonus applied.
-      // If skip: pass a low score (0) so calcAllDerivedSkills uses rate 0.05 (QFilter<75 per spec).
-      if (stashed) {
-        const qFilterBonuses: Partial<Record<DerivedSkill, number>> = {}
-        qFilterBonuses[stashed.triggeredSkill] = isSkip ? 0 : answer
-        dispatch({ type: 'CHECKIN', record: stashed.record, baseAttrDelta: stashed.baseAttrDelta, qFilterBonuses })
+      // 释放/锁定逻辑
+      const effectiveScore = isSkip ? 0 : answer
+      if (effectiveScore >= 75) {
+        // ≥75: 100% 释放 — 给 QFilter 得分代入 7:3 公式
+        if (stashed) {
+          const qFilterScores: Partial<Record<DerivedSkill, number>> = {}
+          qFilterScores[stashed.triggeredSkill] = effectiveScore
+          dispatch({ type: 'CHECKIN', record: stashed.record, baseAttrDelta: stashed.baseAttrDelta, qFilterScores })
+        }
+      } else {
+        // <75: 70% 留存 + 锁定14天
+        const lockUntil = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0]
+        // 先用低分结算（0.7×B̄_j 贡献）
+        if (stashed) {
+          const qFilterScores: Partial<Record<DerivedSkill, number>> = {}
+          qFilterScores[stashed.triggeredSkill] = effectiveScore
+          dispatch({ type: 'CHECKIN', record: stashed.record, baseAttrDelta: stashed.baseAttrDelta, qFilterScores })
+        }
+        // 然后锁定缓冲池
+        dispatch({ type: 'LOCK_POOL', skill: pending.skill, lockedUntil: lockUntil, retention: 0.7 })
       }
     },
     [],
