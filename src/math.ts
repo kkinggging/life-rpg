@@ -88,8 +88,12 @@ export const SKILL_DEFS: DerivedSkillDef[] = [
 // 参数
 // ---------------------------------------------------------------------------
 
-/** 收敛阻尼：每周期闭合 gap 的比例（配合 γ·λ 自然衰减） */
-const CONVERGENCE_DAMPING = 0.20;
+/** 收敛阻尼：每周期闭合 gap 的比例（配合 γ·λ 自然衰减）
+ *  0.30: 一次打卡 close 30% gap × γ×λ≈60% → 实际 18%
+ *      → 5次打卡接近 target, 3次打卡差距减半
+ *      → 衍生技能不再永久滞后于基础属性
+ */
+const CONVERGENCE_DAMPING = 0.30;
 
 /** QFilter 未触发时 Q_effective = B̄_j × DEFAULT_Q_RATIO */
 const DEFAULT_Q_RATIO = 0.5;
