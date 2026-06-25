@@ -412,6 +412,90 @@ export const QUESTIONS: QFilterQuestion[] = [
       { label: '完全茫然·毫无头绪', value: 5, icon: '💀' },
     ],
   },
+
+  // ========================================================
+  // 社交搭讪专项 (6题 — 跨 mastery / flow / behavioralCues / opportunity)
+  // ========================================================
+
+  // dim: 搭讪后体感
+  {
+    id: 'social_post_approach_a',
+    skill: 'mastery',
+    dimension: '搭讪后体感',
+    text: '今天搭讪结束后，你走出那一步时的心态是"做了就赢了"还是"我刚才表现不够好"？',
+    options: [
+      { label: '做了就赢了·不论结果', value: 90, icon: '✨' },
+      { label: '大部分知足·有小遗憾', value: 70, icon: '👍' },
+      { label: '一半满意一半不满意', value: 45, icon: '🤔' },
+      { label: '比较不满意·反复回想', value: 22, icon: '😰' },
+      { label: '后悔做了·觉得尴尬', value: 5, icon: '💀' },
+    ],
+  },
+  {
+    id: 'social_post_approach_b',
+    skill: 'flow',
+    dimension: '搭讪流畅度',
+    text: '搭讪过程中你的语音语调自然吗？身体有没有紧绷或声音发抖？',
+    options: [
+      { label: '完全自然·身体松弛', value: 90, icon: '✨' },
+      { label: '有一点紧张但可控', value: 70, icon: '👍' },
+      { label: '中等紧张·有意识调整', value: 45, icon: '🤔' },
+      { label: '明显紧张·声音或手抖', value: 22, icon: '😰' },
+      { label: '极度紧张·几乎是僵的', value: 5, icon: '💀' },
+    ],
+  },
+  {
+    id: 'social_venue_pressure_a',
+    skill: 'behavioralCues',
+    dimension: '场景压力应对',
+    text: '你在什么场合搭讪的？高压场景（如安静空间、有旁人在场）对你的影响有多大？',
+    options: [
+      { label: '完全不受环境影响', value: 90, icon: '✨' },
+      { label: '高压场景稍有影响但可控', value: 70, icon: '👍' },
+      { label: '环境明显影响发挥', value: 45, icon: '🤔' },
+      { label: '只在低压场景才敢行动', value: 22, icon: '😰' },
+      { label: '根本不敢在公开场合搭讪', value: 5, icon: '💀' },
+    ],
+  },
+  {
+    id: 'social_eyecontact_a',
+    skill: 'behavioralCues',
+    dimension: '眼神接触稳定性',
+    text: '今天社交或搭讪时，你与对方的眼神接触：是稳定从容，还是频繁移开或回避？',
+    options: [
+      { label: '稳定从容·自然对视', value: 90, icon: '✨' },
+      { label: '大部分时候稳定', value: 70, icon: '👍' },
+      { label: '偶尔对视·有时回避', value: 45, icon: '🤔' },
+      { label: '较少对视·经常看别处', value: 22, icon: '😰' },
+      { label: '几乎不敢对视', value: 5, icon: '💀' },
+    ],
+  },
+  {
+    id: 'social_rejection_a',
+    skill: 'flow',
+    dimension: '被拒应对',
+    text: '如果今天遇到了拒绝或冷淡回应，你内心花了多少精力去消化它？',
+    options: [
+      { label: '毫不在意·秒过', value: 90, icon: '✨' },
+      { label: '有点介意但很快翻篇', value: 70, icon: '👍' },
+      { label: '想了几个小时后才放下', value: 45, icon: '🤔' },
+      { label: '今天一直有点耿耿于怀', value: 22, icon: '😰' },
+      { label: '严重影响心情·甚至怀疑自己', value: 5, icon: '💀' },
+    ],
+  },
+  {
+    id: 'social_initiative_a',
+    skill: 'opportunity',
+    dimension: '社交主动性',
+    text: '今天在社交场合中，是你主导推进了对话或关系，还是等别人先动？',
+    options: [
+      { label: '我主导推进了多次', value: 90, icon: '✨' },
+      { label: '我主动了几次', value: 70, icon: '👍' },
+      { label: '偶尔主动', value: 45, icon: '🤔' },
+      { label: '多是别人推进', value: 22, icon: '😰' },
+      { label: '完全被动', value: 5, icon: '💀' },
+    ],
+  },
 ]
 
 // ============================================================
