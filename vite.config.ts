@@ -21,38 +21,47 @@ export default defineConfig({
         start_url: `/life-rpg/?v=${BUILD_ID}`,
         scope: '/life-rpg/',
         icons: [
-          {
-            src: 'icon.svg',
-            sizes: '192x192',
-            type: 'image/svg+xml',
-            purpose: 'any',
-          },
-          {
-            src: 'icon.svg',
-            sizes: '512x512',
-            type: 'image/svg+xml',
-            purpose: 'any maskable',
-          },
+          { src: 'icon.svg', sizes: '192x192', type: 'image/svg+xml', purpose: 'any' },
+          { src: 'icon.svg', sizes: '512x512', type: 'image/svg+xml', purpose: 'any maskable' },
         ],
       },
       workbox: {
-        // 不预缓存 index.html — 让导航请求走网络，解决 iOS PWA 更新卡死
-        globPatterns: ['**/*.{js,css,svg,png,json,ico}'],
+        // 只用 precache 图标，JS/CSS/HTML 全部走运行时缓存
+        globPatterns: ['icon.svg'],
         skipWaiting: true,
         clientsClaim: true,
         cleanupOutdatedCaches: true,
-        // 导航请求（HTML 页面）走网络优先，保证始终拿到最新版
         runtimeCaching: [
+          // HTML — 网络优先，60秒缓存
           {
-            urlPattern: /\/life-rpg\/$/,
+            urlPattern: /\/life-rpg\/.*\.html$/,
             handler: 'NetworkFirst',
             options: {
               cacheName: 'html-cache',
-              expiration: { maxEntries: 1, maxAgeSeconds: 60 },
+              expiration: { maxEntries: 5, maxAgeSeconds: 60 },
             },
           },
+          // JS bundles — 网络优先，5分钟缓存
           {
-            urlPattern: /\/life-rpg\/index\.html$/,
+            urlPattern: /\/life-rpg\/assets\/.*\.js$/,
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'js-cache',
+              expiration: { maxEntries: 20, maxAgeSeconds: 300 },
+            },
+          },
+          // CSS — 网络优先
+          {
+            urlPattern: /\/life-rpg\/assets\/.*\.css$/,
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'css-cache',
+              expiration: { maxEntries: 10, maxAgeSeconds: 300 },
+            },
+          },
+          // 导航请求 — 网络优先
+          {
+            urlPattern: /\/life-rpg\/$/,
             handler: 'NetworkFirst',
             options: {
               cacheName: 'html-cache',
